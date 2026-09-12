@@ -1,177 +1,370 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
-  ArrowRight, Check, ChevronLeft, GraduationCap, HeartHandshake, Home, Search,
-  ShieldCheck, Users, WalletCards, Bell, Plus, Trophy, LogOut, LockKeyhole,
-  Smartphone, Building2, ReceiptText
+  Bell, Building2, Check, ChevronRight, CircleUserRound, GraduationCap, HeartHandshake,
+  Home, MapPin, Minus, Plus, Search, Settings, ShieldCheck, Sparkles, Trophy,
+  WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import type { Commitment, Membership, Project, School } from '@/lib/types';
-import type { User } from '@supabase/supabase-js';
+import type { Project, School } from '@/lib/types';
 
-type Screen = 'welcome' | 'phone' | 'otp' | 'pin' | 'unlock' | 'schools' | 'amount' | 'success' | 'dashboard';
-const money = (cents:number) => new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR',maximumFractionDigits:0}).format(cents/100);
-const schoolType = (level:School['level']) => level === 'primary' ? 'Primary School' : level === 'high' ? 'High School' : 'Combined School';
+type View = 'home' | 'schools' | 'projects' | 'profile';
+type SchoolLevelFilter = 'all' | 'primary' | 'high' | 'combined';
+type DemoMembership = {
+  schoolId: string;
+  amount: number;
+  year: string;
+};
 
-async function pinDigest(phone:string,pin:string){
-  const bytes = new TextEncoder().encode(`skolo-saka:${phone}:${pin}`);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest)).map(x=>x.toString(16).padStart(2,'0')).join('');
+type DemoState = {
+  onboarded: boolean;
+  memberships: DemoMembership[];
+};
+
+const STORAGE_KEY = 'skolo_saka_demo_state_v2';
+const DEFAULT_STATE: DemoState = { onboarded: false, memberships: [] };
+const PROVINCES = ['All provinces','Eastern Cape','Free State','Gauteng','KwaZulu-Natal','Limpopo','Mpumalanga','North West','Northern Cape','Western Cape'];
+
+const money = (cents:number) => new Intl.NumberFormat('en-ZA', {
+  style:'currency', currency:'ZAR', maximumFractionDigits:0
+}).format(cents/100);
+
+function levelLabel(level: School['level']) {
+  if (level === 'primary') return 'Primary School';
+  if (level === 'high') return 'High School';
+  if (level === 'combined') return 'Combined School';
+  return 'School';
 }
 
-export default function Page(){
-  const [screen,setScreen]=useState<Screen>('welcome');
-  const [user,setUser]=useState<User|null>(null);
-  const [phone,setPhone]=useState('');
-  const [otp,setOtp]=useState('');
-  const [pin,setPin]=useState('');
-  const [query,setQuery]=useState('');
-  const [schools,setSchools]=useState<School[]>([]);
-  const [projects,setProjects]=useState<Project[]>([]);
-  const [memberships,setMemberships]=useState<Membership[]>([]);
-  const [commitments,setCommitments]=useState<Commitment[]>([]);
-  const [selected,setSelected]=useState<School[]>([]);
-  const [amounts,setAmounts]=useState<Record<string,number>>({});
-  const [years,setYears]=useState<Record<string,string>>({});
-  const [busy,setBusy]=useState(false);
-  const [notice,setNotice]=useState('');
-  const [error,setError]=useState('');
+function initials(name:string) {
+  return name.split(/\s+/).filter(Boolean).slice(0,2).map(word => word[0]).join('').toUpperCase();
+}
 
-  useEffect(()=>{
-    void loadPublic();
-    void supabase.auth.getSession().then(({data})=>{
-      if(data.session?.user){ setUser(data.session.user); void loadPrivate(data.session.user.id); }
+async function fetchAllSchools(): Promise<School[]> {
+  const pageSize = 1000;
+  const rows: School[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('schools')
+      .select('id,name,level,province,municipality,town,verified')
+      .order('name')
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as School[];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function fetchAllProjects(): Promise<Project[]> {
+  const pageSize = 1000;
+  const rows: Project[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id,school_id,title,description,category,target_cents,status,priority')
+      .order('priority')
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Project[];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return rows;
+}
+
+export default function Page() {
+  const [view, setView] = useState<View>('home');
+  const [schools, setSchools] = useState<School[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [state, setState] = useState<DemoState>(DEFAULT_STATE);
+  const [query, setQuery] = useState('');
+  const [province, setProvince] = useState('All provinces');
+  const [level, setLevel] = useState<SchoolLevelFilter>('all');
+  const [selectedSchool, setSelectedSchool] = useState<School|null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try { setState(JSON.parse(raw) as DemoState); } catch { /* ignore old demo state */ }
+    }
+    void (async () => {
+      setLoading(true);
+      try {
+        const [schoolRows, projectRows] = await Promise.all([fetchAllSchools(), fetchAllProjects()]);
+        setSchools(schoolRows);
+        setProjects(projectRows);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : 'Could not load the school directory.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state]);
+
+  const membershipsBySchool = useMemo(() => new Map(state.memberships.map(item => [item.schoolId, item])), [state.memberships]);
+  const mySchools = useMemo(() => schools.filter(school => membershipsBySchool.has(school.id)), [schools, membershipsBySchool]);
+  const mySchoolIds = useMemo(() => new Set(state.memberships.map(item => item.schoolId)), [state.memberships]);
+  const myProjects = useMemo(() => projects.filter(project => mySchoolIds.has(project.school_id)), [projects, mySchoolIds]);
+  const monthly = state.memberships.reduce((sum, item) => sum + item.amount, 0);
+
+  const filteredSchools = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return schools.filter(school => {
+      const matchesText = !q || `${school.name} ${school.town ?? ''} ${school.municipality ?? ''} ${school.province}`.toLowerCase().includes(q);
+      const matchesProvince = province === 'All provinces' || school.province === province;
+      const matchesLevel = level === 'all' || school.level === level;
+      return matchesText && matchesProvince && matchesLevel;
     });
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
-      setUser(session?.user ?? null);
-      if(session?.user) void loadPrivate(session.user.id);
+  }, [schools, query, province, level]);
+
+  function addSchool(school:School) {
+    setState(prev => {
+      if (prev.memberships.some(item => item.schoolId === school.id)) return prev;
+      return {
+        ...prev,
+        onboarded: true,
+        memberships: [...prev.memberships, { schoolId: school.id, amount: 10, year: '' }]
+      };
     });
-    return ()=>subscription.unsubscribe();
-  },[]);
-
-  async function loadPublic(){
-    const [{data:s},{data:p}] = await Promise.all([
-      supabase.from('schools').select('*').order('name'),
-      supabase.from('projects').select('*').order('priority').order('created_at',{ascending:false}),
-    ]);
-    setSchools((s ?? []) as School[]); setProjects((p ?? []) as Project[]);
   }
 
-  async function loadPrivate(userId:string){
-    const [{data:m},{data:c}] = await Promise.all([
-      supabase.from('school_memberships').select('*, schools(*)').eq('user_id',userId),
-      supabase.from('commitments').select('*').eq('user_id',userId).order('created_at'),
-    ]);
-    setMemberships((m ?? []) as unknown as Membership[]); setCommitments((c ?? []) as Commitment[]);
+  function removeSchool(schoolId:string) {
+    setState(prev => ({
+      ...prev,
+      memberships: prev.memberships.filter(item => item.schoolId !== schoolId)
+    }));
+    if (selectedSchool?.id === schoolId) setSelectedSchool(null);
   }
 
-  const filtered=useMemo(()=>schools.filter(s=>`${s.name} ${s.town ?? ''} ${s.province} ${schoolType(s.level)}`.toLowerCase().includes(query.toLowerCase())),[schools,query]);
-  const total=selected.reduce((sum,s)=>sum+(amounts[s.id]||10),0);
-  const activeMonthly=commitments.filter(c=>c.status==='active').reduce((sum,c)=>sum+c.amount_cents,0);
-  const pendingMonthly=commitments.filter(c=>c.status==='pending').reduce((sum,c)=>sum+c.amount_cents,0);
-
-  function resetMessages(){setError('');setNotice('');}
-  function toggleSchool(s:School){setSelected(prev=>prev.some(x=>x.id===s.id)?prev.filter(x=>x.id!==s.id):[...prev,s]);}
-
-  async function requestOtp(e?:FormEvent){ e?.preventDefault(); resetMessages(); setBusy(true);
-    const normalized = `+27${phone.replace(/^0/,'')}`;
-    const {error}=await supabase.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:true}});
-    setBusy(false);
-    if(error){ setError(`SMS verification is not available yet: ${error.message}. You can still explore the public pilot below.`); return; }
-    setNotice(`Code sent to ${normalized}`); setScreen('otp');
+  function updateMembership(schoolId:string, patch:Partial<DemoMembership>) {
+    setState(prev => ({
+      ...prev,
+      memberships: prev.memberships.map(item => item.schoolId === schoolId ? {...item, ...patch} : item)
+    }));
   }
 
-  async function verifyOtp(){ resetMessages(); setBusy(true); const normalized=`+27${phone.replace(/^0/,'')}`;
-    const {data,error}=await supabase.auth.verifyOtp({phone:normalized,token:otp,type:'sms'}); setBusy(false);
-    if(error){setError(error.message);return;}
-    if(data.user){setUser(data.user);setScreen('pin');}
+  function startFirstTime() {
+    setState(prev => ({...prev, onboarded:true}));
+    setView('schools');
   }
 
-  async function savePin(){ if(pin.length!==4) return; resetMessages();
-    const normalized=`+27${phone.replace(/^0/,'')}`; const hash=await pinDigest(normalized,pin);
-    localStorage.setItem('skolo_saka_trusted_phone',normalized);
-    localStorage.setItem('skolo_saka_pin_hash',hash);
-    setPin(''); setScreen('schools');
+  function resetDemo() {
+    setState(DEFAULT_STATE);
+    setQuery('');
+    setProvince('All provinces');
+    setLevel('all');
+    setSelectedSchool(null);
+    setView('home');
   }
 
-  async function trustedUnlock(){ resetMessages(); const storedPhone=localStorage.getItem('skolo_saka_trusted_phone')||'';
-    const storedHash=localStorage.getItem('skolo_saka_pin_hash')||''; const hash=await pinDigest(storedPhone,pin);
-    const {data}=await supabase.auth.getSession();
-    if(!storedPhone || hash!==storedHash){setError('Incorrect PIN.');return;}
-    if(!data.session){ setPhone(storedPhone.replace('+27','')); setPin(''); setNotice('This device needs phone verification again.'); setScreen('phone'); return; }
-    setUser(data.session.user); await loadPrivate(data.session.user.id); setPin(''); setScreen('dashboard');
-  }
-
-  async function saveSchoolsAndCommitments(){ if(!user) return; resetMessages(); setBusy(true);
-    const membershipRows=selected.map(s=>({user_id:user.id,school_id:s.id,role:'alumnus',graduation_year:years[s.id]?Number(years[s.id]):null,verified:false}));
-    const {error:mErr}=await supabase.from('school_memberships').upsert(membershipRows,{onConflict:'user_id,school_id',ignoreDuplicates:true});
-    if(mErr){setBusy(false);setError(mErr.message);return;}
-    const commitmentRows=selected.map(s=>({user_id:user.id,school_id:s.id,amount_cents:(amounts[s.id]||10)*100,currency:'ZAR',frequency:'monthly',status:'pending'}));
-    const {error:cErr}=await supabase.from('commitments').insert(commitmentRows);
-    setBusy(false); if(cErr){setError(cErr.message);return;}
-    await loadPrivate(user.id); setScreen('success');
-  }
-
-  async function signOut(){ await supabase.auth.signOut(); setUser(null); setMemberships([]); setCommitments([]); setScreen('welcome'); }
-  function demo(){setScreen('dashboard');}
-
-  return <main className="site-shell">
-    <header className="topbar">
-      <button className="brand" onClick={()=>setScreen('welcome')}><span className="brand-mark"><GraduationCap size={20}/></span><span>Skolo Saka</span></button>
-      <span className="tag">R10 a month. For the school that made you.</span>
-      {user && <button className="top-signout" onClick={signOut}><LogOut size={16}/> Sign out</button>}
-    </header>
-
-    {screen==='welcome' && <>
-      <section className="hero-grid">
-        <div className="hero-copy">
-          <span className="eyebrow">A lifelong alumni contribution network</span>
-          <h1>Your school helped make you. <em>Keep making it better.</em></h1>
-          <p>Join former learners contributing from just R10 a month to the primary and high schools that shaped them.</p>
-          <div className="hero-actions"><button className="primary" onClick={()=>{resetMessages();setScreen('phone')}}>Join Skolo Saka <ArrowRight size={18}/></button><button className="ghost" onClick={()=>setScreen('unlock')}><LockKeyhole size={17}/> Trusted device login</button></div>
-          <button className="demo-link" onClick={demo}>Explore the public pilot without signing in →</button>
-          <div className="trust-row"><span><ShieldCheck size={17}/> Transparent</span><span><HeartHandshake size={17}/> Alumni-powered</span><span><Trophy size={17}/> Visible impact</span></div>
+  return (
+    <main className="app-shell">
+      <aside className="app-sidebar">
+        <button className="brand side-brand" onClick={() => setView('home')}>
+          <span className="brand-mark"><GraduationCap size={20}/></span>
+          <span>Skolo Saka</span>
+        </button>
+        <div className="pilot-pill"><Sparkles size={14}/> Logged-in pilot mode</div>
+        <nav className="app-nav">
+          <NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/>
+          <NavButton active={view==='schools'} icon={<Building2/>} label="Schools" badge={state.memberships.length || undefined} onClick={()=>setView('schools')}/>
+          <NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" badge={myProjects.length || undefined} onClick={()=>setView('projects')}/>
+          <NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/>
+        </nav>
+        <div className="side-summary">
+          <small>Your monthly intention</small>
+          <strong>R{monthly}</strong>
+          <span>{state.memberships.length} {state.memberships.length===1?'school':'schools'}</span>
         </div>
-        <div className="impact-card">
-          <span className="mini-label">The compounding idea</span><div className="impact-number">R600,000</div><p>5,000 alumni × R10 × 12 months</p>
-          {schools.slice(0,2).map(s=><div className="project-preview" key={s.id}><span>{s.level==='primary'?'📚':'🎓'}</span><div><b>{s.name}</b><small>{schoolType(s.level)} · {s.town || s.province}</small></div><strong>Join</strong></div>)}
-          <div className="people-strip"><Users size={17}/><b>{schools.length}</b> pilot schools loaded from the live database</div>
-        </div>
+      </aside>
+
+      <section className="app-main">
+        <header className="app-topbar">
+          <button className="mobile-brand" onClick={()=>setView('home')}><GraduationCap size={20}/> Skolo Saka</button>
+          <div className="topbar-spacer"/>
+          <button className="round-btn" aria-label="Notifications"><Bell size={18}/></button>
+          <div className="user-chip"><span className="avatar">M</span><span><b>Mahlatse</b><small>Pilot account</small></span></div>
+        </header>
+
+        {view==='home' && (
+          <div className="page-content">
+            {!state.onboarded || state.memberships.length===0 ? (
+              <section className="first-time-card">
+                <div>
+                  <span className="eyebrow">Welcome to Skolo Saka</span>
+                  <h1>Which schools made you?</h1>
+                  <p>Start by finding your primary school, high school, or both. You can change, add or remove schools at any time.</p>
+                  <button className="primary" onClick={startFirstTime}>Find my schools <ChevronRight size={18}/></button>
+                </div>
+                <div className="onboarding-steps">
+                  <Step n="1" title="Find your schools" text="Search the national school directory by name, town, province or type."/>
+                  <Step n="2" title="Set your link" text="Add your leaving or matric year and choose a monthly amount from R10."/>
+                  <Step n="3" title="Follow the impact" text="See projects, updates and eventually every rand collected and spent."/>
+                </div>
+              </section>
+            ) : (
+              <>
+                <section className="welcome-row">
+                  <div><span className="eyebrow">Your Skolo Saka</span><h1>Good to see you.</h1><p>You’re connected to {state.memberships.length} {state.memberships.length===1?'school':'schools'}.</p></div>
+                  <button className="outline" onClick={()=>setView('schools')}><Plus size={17}/> Add another school</button>
+                </section>
+                <section className="metric-grid">
+                  <Metric label="My schools" value={String(state.memberships.length)} note="You can remove or add anytime"/>
+                  <Metric label="Monthly intention" value={`R${monthly}`} note="No payment is taken in pilot mode"/>
+                  <Metric label="Projects to follow" value={String(myProjects.length)} note="Across your selected schools"/>
+                </section>
+                <SectionHeader title="My schools" action="Manage schools" onClick={()=>setView('schools')}/>
+                <div className="my-school-grid">
+                  {mySchools.map((school, index) => {
+                    const membership = membershipsBySchool.get(school.id)!;
+                    return <MySchoolCard key={school.id} school={school} membership={membership} index={index} onRemove={()=>removeSchool(school.id)} onOpen={()=>setSelectedSchool(school)}/>;
+                  })}
+                </div>
+                <SectionHeader title="Projects from my schools" action="See all projects" onClick={()=>setView('projects')}/>
+                <ProjectGrid projects={myProjects.slice(0,3)} schools={schools}/>
+              </>
+            )}
+          </div>
+        )}
+
+        {view==='schools' && (
+          <div className="page-content">
+            <section className="page-heading">
+              <div><span className="eyebrow">School directory</span><h1>Find the schools that made you.</h1><p>Browse every school currently loaded in Skolo Saka. The directory is built to scale to the full DBE EMIS masterlist.</p></div>
+              <div className="directory-count"><strong>{loading ? '…' : schools.length.toLocaleString()}</strong><span>schools available</span></div>
+            </section>
+
+            <div className="directory-toolbar">
+              <label className="directory-search"><Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search school, town, municipality or province"/></label>
+              <select value={province} onChange={e=>setProvince(e.target.value)}>{PROVINCES.map(item=><option key={item}>{item}</option>)}</select>
+            </div>
+            <div className="filter-pills">
+              {(['all','primary','high','combined'] as SchoolLevelFilter[]).map(item => (
+                <button key={item} className={level===item?'active':''} onClick={()=>setLevel(item)}>{item==='all'?'All schools':item==='primary'?'Primary':item==='high'?'High school':'Combined'}</button>
+              ))}
+            </div>
+
+            {loadError && <div className="state-message error">{loadError}</div>}
+            {loading ? <div className="state-message">Loading the school directory…</div> : (
+              <div className="directory-layout">
+                <div>
+                  <div className="results-row"><b>{filteredSchools.length.toLocaleString()} results</b><span>{query ? `for “${query}”` : 'Use the filters to narrow the directory'}</span></div>
+                  <div className="directory-list">
+                    {filteredSchools.map(school => {
+                      const membership = membershipsBySchool.get(school.id);
+                      return (
+                        <article className="directory-school" key={school.id}>
+                          <button className="school-main" onClick={()=>setSelectedSchool(school)}>
+                            <span className="school-badge">{initials(school.name)}</span>
+                            <span className="school-copy"><b>{school.name}</b><small>{levelLabel(school.level)} · {school.town || school.municipality || school.province}</small><em><MapPin size={12}/>{school.province}{school.verified ? ' · Verified' : ''}</em></span>
+                          </button>
+                          {membership ? (
+                            <button className="remove-btn" onClick={()=>removeSchool(school.id)}><Minus size={16}/> Remove</button>
+                          ) : (
+                            <button className="add-btn" onClick={()=>addSchool(school)}><Plus size={16}/> Add</button>
+                          )}
+                        </article>
+                      );
+                    })}
+                    {!filteredSchools.length && <div className="empty-state"><Search size={28}/><h3>No schools found</h3><p>Try another school name, town or province.</p></div>}
+                  </div>
+                </div>
+
+                <aside className="my-selection-panel">
+                  <div className="panel-title"><div><span className="eyebrow">My schools</span><h3>{state.memberships.length} selected</h3></div><WalletCards size={20}/></div>
+                  {!mySchools.length ? <p className="muted">Add a school from the directory. It will appear here immediately.</p> : mySchools.map(school => {
+                    const membership = membershipsBySchool.get(school.id)!;
+                    return <div className="selection-item" key={school.id}><div><b>{school.name}</b><small>{levelLabel(school.level)}</small></div><button aria-label={`Remove ${school.name}`} onClick={()=>removeSchool(school.id)}><X size={15}/></button><label>Year<input value={membership.year} onChange={e=>updateMembership(school.id,{year:e.target.value.replace(/\D/g,'').slice(0,4)})} placeholder="e.g. 2008"/></label><label>Monthly<select value={membership.amount} onChange={e=>updateMembership(school.id,{amount:Number(e.target.value)})}>{[10,25,50,100,250,500].map(a=><option value={a} key={a}>R{a}</option>)}</select></label></div>;
+                  })}
+                  <div className="selection-total"><span>Total intention</span><strong>R{monthly}/month</strong></div>
+                  <button className="primary full" disabled={!mySchools.length} onClick={()=>setView('home')}><Check size={17}/> Save and view dashboard</button>
+                  <small className="fine-print">Pilot mode only — no payment is collected.</small>
+                </aside>
+              </div>
+            )}
+          </div>
+        )}
+
+        {view==='projects' && (
+          <div className="page-content">
+            <section className="page-heading"><div><span className="eyebrow">Projects</span><h1>See what schools need.</h1><p>Projects from your schools appear first. You can still browse all active projects in the network.</p></div></section>
+            {myProjects.length>0 && <><SectionHeader title="From my schools"/><ProjectGrid projects={myProjects} schools={schools}/></>}
+            <SectionHeader title="All projects"/>
+            <ProjectGrid projects={projects} schools={schools}/>
+            {!projects.length && <div className="empty-state"><Trophy size={28}/><h3>No projects yet</h3><p>Projects submitted by schools will appear here.</p></div>}
+          </div>
+        )}
+
+        {view==='profile' && (
+          <div className="page-content profile-page">
+            <section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your Skolo Saka settings.</h1><p>Authentication is intentionally bypassed while we perfect the product experience.</p></div></section>
+            <div className="profile-grid">
+              <article className="settings-card"><div className="settings-icon"><CircleUserRound/></div><h3>Pilot identity</h3><p>Mahlatse · Logged-in prototype account</p><span className="status-pill"><Check size={13}/> Active demo session</span></article>
+              <article className="settings-card"><div className="settings-icon"><ShieldCheck/></div><h3>Authentication</h3><p>Phone OTP and PIN are parked for now. Navigation and school behaviour can be tested without them.</p></article>
+              <article className="settings-card"><div className="settings-icon"><Settings/></div><h3>Reset first-time experience</h3><p>Clear selected schools and return to the first screen.</p><button className="danger-outline" onClick={resetDemo}>Reset pilot account</button></article>
+            </div>
+          </div>
+        )}
       </section>
-      <section className="public-projects"><div className="section-title"><div><span className="eyebrow">Pilot priorities</span><h2>What communities can build together</h2></div></div><div className="projects">{projects.slice(0,3).map(p=><article className="project" key={p.id}><div className="project-icon">{p.category==='Sport'?'⚽':'💻'}</div><div className="project-meta"><span>{p.category||'Project'}</span><small>{p.status}</small></div><h4>{p.title}</h4><p>{p.description}</p><div className="funding"><b>Target {money(p.target_cents)}</b><span>Collections not live yet</span></div></article>)}</div></section>
-    </>}
 
-    {screen!=='welcome' && screen!=='dashboard' && <section className="flow-wrap"><div className="phone-frame">
-      <div className="flow-top"><button className="icon-btn" onClick={()=>setScreen('welcome')}><ChevronLeft/></button><div className="flow-logo"><span className="brand-mark small"><GraduationCap size={16}/></span>Skolo Saka</div><span className="step-pill">Secure</span></div>
-      {(error||notice) && <div className={error?'message error':'message'}>{error||notice}</div>}
-      {screen==='phone' && <form className="flow-content" onSubmit={requestOtp}><span className="eyebrow">Phone verification</span><h2>Start with your number</h2><p>We use SMS once to prove the number belongs to you. Returning on a trusted device is unlocked with your PIN.</p><label>South African mobile number</label><div className="input-row"><span>🇿🇦 +27</span><input value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,9))} placeholder="82 123 4567" inputMode="numeric"/></div><button className="primary full" disabled={busy||phone.length<9}>{busy?'Sending…':'Send code'} <ArrowRight size={18}/></button><button type="button" className="text-btn" onClick={demo}>Explore public pilot instead</button></form>}
-      {screen==='otp' && <div className="flow-content"><span className="eyebrow">Verify</span><h2>Check your messages</h2><p>Enter the 6-digit SMS code.</p><input className="otp-single" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="123456" inputMode="numeric"/><button className="primary full" disabled={busy||otp.length!==6} onClick={verifyOtp}>Verify number <ArrowRight size={18}/></button></div>}
-      {screen==='pin' && <div className="flow-content"><span className="eyebrow">Trusted device</span><h2>Create a 4-digit PIN</h2><p>Your PIN stays on this device. It unlocks an existing secure session; it does not replace phone verification on a new device.</p><input className="pin-input" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••" inputMode="numeric" type="password"/><button className="primary full" disabled={pin.length!==4} onClick={savePin}>Continue <ArrowRight size={18}/></button></div>}
-      {screen==='unlock' && <div className="flow-content"><span className="eyebrow">Welcome back</span><h2>Enter your PIN</h2><p>Fast login on this trusted device.</p><input className="pin-input" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••" inputMode="numeric" type="password"/><button className="primary full" disabled={pin.length!==4} onClick={trustedUnlock}>Unlock <ArrowRight size={18}/></button><button className="text-btn" onClick={()=>setScreen('phone')}>Use SMS instead</button></div>}
-      {screen==='schools' && <div className="flow-content school-flow"><span className="eyebrow">Your story</span><h2>Which schools made you?</h2><p>Add your primary school, high school, or both.</p><div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search school or area"/></div><div className="school-list">{filtered.map(s=><button key={s.id} className={`school-row ${selected.some(x=>x.id===s.id)?'selected':''}`} onClick={()=>toggleSchool(s)}><span className="school-badge">{s.name.split(' ').slice(0,2).map(x=>x[0]).join('')}</span><span><b>{s.name}</b><small>{schoolType(s.level)} · {s.town || s.province}</small></span><span className="check">{selected.some(x=>x.id===s.id)?<Check size={16}/>:<Plus size={16}/>}</span></button>)}</div><button className="primary full" onClick={()=>setScreen('amount')} disabled={!selected.length}>Continue <ArrowRight size={18}/></button></div>}
-      {screen==='amount' && <div className="flow-content"><span className="eyebrow">Lifetime commitment</span><h2>Choose your monthly amount</h2><p>R10 is the starting point. Payment collection is only activated after a real payment provider is connected.</p>{selected.map(s=><div className="amount-card" key={s.id}><div><span className="school-badge small-badge">{s.name[0]}</span><b>{s.name}</b></div><input className="year-input" value={years[s.id]||''} onChange={e=>setYears(v=>({...v,[s.id]:e.target.value.replace(/\D/g,'').slice(0,4)}))} placeholder="Matric/leaving year (optional)"/><div className="amount-options">{[10,25,50,100].map(a=><button key={a} className={(amounts[s.id]||10)===a?'active':''} onClick={()=>setAmounts(v=>({...v,[s.id]:a}))}>R{a}</button>)}</div></div>)}<div className="total-card"><span>Total intended monthly commitment</span><strong>R{total}/month</strong></div><button className="primary full" disabled={busy} onClick={saveSchoolsAndCommitments}>{busy?'Saving…':'Save commitment'} <ArrowRight size={18}/></button><small className="secure"><ShieldCheck size={14}/> Saved as pending until a real payment mandate is approved.</small></div>}
-      {screen==='success' && <div className="flow-content success"><span className="success-icon"><Check/></span><span className="eyebrow">Profile created</span><h2>Your schools are connected.</h2><p>Your monthly commitment is saved as <b>pending</b>. No money has been collected.</p><button className="primary full" onClick={()=>setScreen('dashboard')}>Go to dashboard <ArrowRight size={18}/></button></div>}
-    </div></section>}
+      <nav className="mobile-nav">
+        <NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/>
+        <NavButton active={view==='schools'} icon={<Building2/>} label="Schools" onClick={()=>setView('schools')}/>
+        <NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" onClick={()=>setView('projects')}/>
+        <NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/>
+      </nav>
 
-    {screen==='dashboard' && <Dashboard user={user} schools={schools} projects={projects} memberships={memberships} commitments={commitments} activeMonthly={activeMonthly} pendingMonthly={pendingMonthly} onJoin={()=>user?setScreen('schools'):setScreen('phone')} />}
-
-    <footer><span>Skolo Saka</span><p>Built for transparent, long-term alumni support of South African schools.</p></footer>
-  </main>
+      {selectedSchool && <SchoolDrawer school={selectedSchool} projects={projects.filter(p=>p.school_id===selectedSchool.id)} membership={membershipsBySchool.get(selectedSchool.id)} onClose={()=>setSelectedSchool(null)} onAdd={()=>addSchool(selectedSchool)} onRemove={()=>removeSchool(selectedSchool.id)} onUpdate={patch=>updateMembership(selectedSchool.id,patch)}/>} 
+    </main>
+  );
 }
 
-function Dashboard({user,schools,projects,memberships,commitments,activeMonthly,pendingMonthly,onJoin}:{user:User|null;schools:School[];projects:Project[];memberships:Membership[];commitments:Commitment[];activeMonthly:number;pendingMonthly:number;onJoin:()=>void}){
-  const memberSchools = memberships.map(m=>(m as Membership & {schools?:School}).schools).filter(Boolean) as School[];
-  const visibleSchools = memberSchools.length ? memberSchools : schools.slice(0,2);
-  return <section className="dashboard-shell">
-    <aside className="sidebar"><div className="brand side-brand"><span className="brand-mark"><GraduationCap size={20}/></span><span>Skolo Saka</span></div><nav><button className="active"><Home/>Home</button><button><GraduationCap/>My schools</button><button><WalletCards/>Contributions</button><button><Users/>Alumni</button><button><Bell/>Updates</button></nav><div className="side-profile"><span className="avatar">SS</span><div><b>{user?'Alumnus':'Public pilot'}</b><small>{user?.phone || 'Explore mode'}</small></div></div></aside>
-    <div className="dash-main"><div className="dash-header"><div><span className="eyebrow">Skolo Saka dashboard</span><h2>{user?'Welcome back 👋🏾':'Public pilot dashboard'}</h2><p>{user?'Your school relationships and commitments are stored in the live database.':'Explore the live school and project data before joining.'}</p></div><button className="outline" onClick={onJoin}><Plus size={17}/> {user?'Add school':'Join'}</button></div>
-      <div className="metric-grid"><div className="metric"><small>Active monthly collection</small><strong>{money(activeMonthly)}</strong><em>{activeMonthly? 'Provider-confirmed commitments':'No payment provider connected yet'}</em></div><div className="metric"><small>Pending monthly intent</small><strong>{money(pendingMonthly)}</strong><em>{commitments.filter(c=>c.status==='pending').length} pending commitment(s)</em></div><div className="metric"><small>Your schools</small><strong>{user?memberSchools.length:schools.length}</strong><em>{user?'Connected alumni relationships':'Pilot database'}</em></div></div>
-      <div className="section-title"><div><h3>{user?'Your schools':'Pilot schools'}</h3><p>Primary and high schools are first-class entities.</p></div><button className="text-btn" onClick={onJoin}><Plus size={16}/> Add school</button></div>
-      <div className="school-cards">{visibleSchools.map((s,i)=><article className={`big-school ${i%2?'dark':''}`} key={s.id}><div className="school-card-head"><span className="school-badge large">{s.name.split(' ').slice(0,2).map(x=>x[0]).join('')}</span><div><small>{schoolType(s.level)}</small><h3>{s.name}</h3><p>{s.town || s.province}, {s.province}</p></div></div><div className="school-stats"><span><b>{s.verified?'Verified':'Pending'}</b><small>school status</small></span><span><b>{projects.filter(p=>p.school_id===s.id).length}</b><small>visible projects</small></span><span><b>{money(commitments.find(c=>c.school_id===s.id)?.amount_cents || 0)}</b><small>your monthly intent</small></span></div></article>)}</div>
-      <div className="section-title"><div><h3>Current priorities</h3><p>Targets are live; raised amounts remain zero until verified payments hit the ledger.</p></div></div>
-      <div className="projects">{projects.slice(0,6).map(p=><article className="project" key={p.id}><div className="project-icon">{p.category==='Sport'?'⚽':'💻'}</div><div className="project-meta"><span>{p.category||'Project'}</span><small>{p.status}</small></div><h4>{p.title}</h4><p>{p.description}</p><div className="progress"><i style={{width:'0%'}}/></div><div className="funding"><b>R0 verified</b><span>Target {money(p.target_cents)}</span></div></article>)}</div>
-      <div className="readiness-grid"><article><Smartphone/><h4>Phone identity</h4><p>Supabase phone OTP is wired. It activates once an SMS provider is configured.</p></article><article><ReceiptText/><h4>Money trail</h4><p>Commitments, payment attempts, ledger entries, expenditures and public evidence are separate auditable records.</p></article><article><Building2/><h4>School governance</h4><p>Membership roles support alumni and school administrators without sharing passwords or mutable balances.</p></article></div>
-    </div>
-  </section>
+function NavButton({active,icon,label,badge,onClick}:{active:boolean;icon:ReactNode;label:string;badge?:number;onClick:()=>void}) {
+  return <button className={active?'active':''} onClick={onClick}>{icon}<span>{label}</span>{badge ? <b className="nav-badge">{badge}</b> : null}</button>;
+}
+
+function Step({n,title,text}:{n:string;title:string;text:string}) {
+  return <div className="step-card"><span>{n}</span><div><b>{title}</b><p>{text}</p></div></div>;
+}
+
+function Metric({label,value,note}:{label:string;value:string;note:string}) {
+  return <article className="metric"><small>{label}</small><strong>{value}</strong><em>{note}</em></article>;
+}
+
+function SectionHeader({title,action,onClick}:{title:string;action?:string;onClick?:()=>void}) {
+  return <div className="section-title"><h3>{title}</h3>{action && <button onClick={onClick}>{action} <ChevronRight size={15}/></button>}</div>;
+}
+
+function MySchoolCard({school,membership,index,onRemove,onOpen}:{school:School;membership:DemoMembership;index:number;onRemove:()=>void;onOpen:()=>void}) {
+  return <article className={`my-school-card ${index===0?'featured':''}`}>
+    <button className="school-card-open" onClick={onOpen}>
+      <span className="school-badge large">{initials(school.name)}</span>
+      <div><small>{levelLabel(school.level)}</small><h3>{school.name}</h3><p>{school.town || school.municipality || school.province}, {school.province}</p></div>
+      <ChevronRight size={18}/>
+    </button>
+    <div className="school-mini-stats"><span><b>R{membership.amount}</b><small>monthly</small></span><span><b>{membership.year || '—'}</b><small>leaving year</small></span><span><b>Pending</b><small>payments</small></span></div>
+    <button className="remove-school-link" onClick={onRemove}><Minus size={15}/> Remove school</button>
+  </article>;
+}
+
+function ProjectGrid({projects,schools}:{projects:Project[];schools:School[]}) {
+  const schoolMap = new Map(schools.map(s=>[s.id,s]));
+  return <div className="projects-grid">{projects.map(project=>{
+    const school = schoolMap.get(project.school_id);
+    return <article className="project-card" key={project.id}><div className="project-top"><span className="project-icon">{project.category?.toLowerCase().includes('sport')?'⚽':project.category?.toLowerCase().includes('computer')?'💻':'🏫'}</span><span className="status-pill">{project.status}</span></div><small className="project-school">{school?.name || 'School project'}</small><h3>{project.title}</h3><p>{project.description || 'Project details will be published by the school.'}</p><div className="project-bottom"><b>Target {money(project.target_cents)}</b><span>Funding not live</span></div></article>;
+  })}</div>;
+}
+
+function SchoolDrawer({school,projects,membership,onClose,onAdd,onRemove,onUpdate}:{school:School;projects:Project[];membership?:DemoMembership;onClose:()=>void;onAdd:()=>void;onRemove:()=>void;onUpdate:(patch:Partial<DemoMembership>)=>void}) {
+  return <div className="drawer-backdrop" onClick={onClose}><aside className="school-drawer" onClick={e=>e.stopPropagation()}><button className="drawer-close" onClick={onClose}><X/></button><span className="school-badge drawer-badge">{initials(school.name)}</span><span className="eyebrow">{levelLabel(school.level)}</span><h2>{school.name}</h2><p className="drawer-location"><MapPin size={15}/>{school.town || school.municipality || school.province}, {school.province}</p>{school.verified && <span className="verified-chip"><ShieldCheck size={14}/> Verified school record</span>}<div className="drawer-section"><h4>Your relationship</h4>{membership ? <div className="drawer-controls"><label>Leaving / matric year<input value={membership.year} onChange={e=>onUpdate({year:e.target.value.replace(/\D/g,'').slice(0,4)})} placeholder="e.g. 2008"/></label><label>Monthly amount<select value={membership.amount} onChange={e=>onUpdate({amount:Number(e.target.value)})}>{[10,25,50,100,250,500].map(a=><option key={a} value={a}>R{a}</option>)}</select></label><button className="danger-outline full" onClick={onRemove}><Minus size={16}/> Remove from my schools</button></div> : <button className="primary full" onClick={onAdd}><Plus size={17}/> Add to my schools</button>}</div><div className="drawer-section"><h4>Projects</h4>{projects.length ? projects.map(project=><div className="drawer-project" key={project.id}><div><b>{project.title}</b><small>{project.status} · Target {money(project.target_cents)}</small></div><ChevronRight size={16}/></div>) : <p className="muted">No public projects from this school yet.</p>}</div><div className="drawer-note"><HeartHandshake size={18}/><span>This is the kind of school profile alumni will eventually use to follow projects, finances, updates and classmates.</span></div></aside></div>;
 }
