@@ -1,4 +1,4 @@
-export type SchoolLevel = 'primary' | 'high' | 'combined';
+export type SchoolLevel = 'primary' | 'high' | 'combined' | 'other';
 
 export type School = {
   id: string;
