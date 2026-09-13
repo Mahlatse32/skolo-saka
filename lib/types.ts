@@ -21,12 +21,21 @@ export type Project = {
   priority: number;
 };
 
+export type Profile = {
+  id: string;
+  phone: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+};
+
 export type Membership = {
   id: string;
   school_id: string;
   graduation_year: number | null;
   start_year: number | null;
   end_year: number | null;
+  grade_left: number | null;
   verified: boolean;
   schools?: School;
 };
