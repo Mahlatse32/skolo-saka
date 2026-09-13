@@ -34,3 +34,11 @@ Use the Test Secret Key only until the complete recurring flow has been tested.
 7. The signed webhook activates the commitment and writes the contribution to the ledger idempotently.
 
 The app never stores card numbers, CVVs, or Paystack secret keys in Supabase/browser state.
+
+## Public launch
+
+Use the same canonical public origin for `NEXT_APP_URL`, callback and webhook URLs (for example `https://www.skolosaka.co.za`). Configure the live webhook separately from the test webhook. Complete merchant approval and payout-account verification before switching to a live secret key. Never change to live credentials merely to hide the demo banner.
+
+Payments now disclose card collection, charge-now terms, cancellation, and processing-fee deductions. Checkout requires explicit consent; its version and timestamp are sent in transaction metadata. Both checkout types currently use cards. Bank-account debit orders are not offered. School allocations represent gross contributions, not net bank settlements. The payment page labels gross allocations explicitly.
+
+Before promotion, verify real SMS; one-off and monthly checkout; signed callback/webhook recording without duplicates; declined/abandoned payments; cancellation at Paystack; and actual bank settlement. A successful build or test payment does not prove live settlement. Check webhook delivery for subscription failures and card-expiry scenarios; full automatic payment-recovery handling is not yet implemented.
