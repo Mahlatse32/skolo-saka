@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
+import './profile.css';
 
 export const metadata: Metadata = {
   title: 'Skolo Saka — R10 a month for the school that made you',
