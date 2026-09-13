@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+
+# Local environment files may contain secrets.
+.env*
+!.env.example
+
+*.tsbuildinfo
+npm-debug.log*

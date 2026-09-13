@@ -33,4 +33,24 @@ npm install
 npm run dev
 ```
 
+Then open [http://localhost:3000](http://localhost:3000).
+
+The main app can run immediately using its browser-safe pilot Supabase defaults. To use another Supabase project, copy `.env.example` to `.env.local` and replace its values before starting the server.
+
+Payment flows additionally require server-only credentials in `.env.local`:
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+PAYSTACK_SECRET_KEY=your-paystack-test-secret-key
+```
+
+Do not commit `.env.local` or expose either server-only key through a `NEXT_PUBLIC_` variable.
+
+To verify a local setup:
+
+```bash
+npm run build
+npm run dev
+```
+
 The browser client uses the Supabase publishable key only. Never expose a service-role key to the frontend.
