@@ -8,7 +8,7 @@ Add these to the `skolo-saka-arnx` project in Vercel → Settings → Environmen
 
 - `PAYSTACK_SECRET_KEY` = your Paystack **Test Secret Key** (`sk_test_...` while testing)
 - `SUPABASE_SERVICE_ROLE_KEY` = the Supabase service-role secret (server only)
-- `NEXT_PUBLIC_APP_URL` = `https://skolo-saka-arnx.vercel.app`
+- `NEXT_APP_URL` = `https://skolo-saka-arnx.vercel.app`
 
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` should remain configured as before.
 
