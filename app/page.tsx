@@ -15,10 +15,12 @@ type View = 'home' | 'schools' | 'projects' | 'profile';
 type SchoolLevelFilter = 'all' | 'primary' | 'high' | 'combined';
 type AuthStep = 'login' | 'register' | 'otp' | 'create-pin';
 type UserMembership = Membership & { schools?: School };
+type ProjectWithSchool = Project & { schools?: School | null };
 type ProfileDraft = { first_name: string; last_name: string; email: string };
 
 const PROVINCES = ['All provinces','Eastern Cape','Free State','Gauteng','KwaZulu-Natal','Limpopo','Mpumalanga','North West','Northern Cape','Western Cape'];
 const GRADES = Array.from({length:12},(_,i)=>i+1);
+const SCHOOL_PAGE_SIZE = 40;
 const money = (cents:number) => new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR',maximumFractionDigits:0}).format(cents/100);
 
 function levelLabel(level: School['level']) {
@@ -40,19 +42,30 @@ async function pinPassword(phone:string,pin:string){
   const hex=Array.from(new Uint8Array(digest)).map(x=>x.toString(16).padStart(2,'0')).join('');
   return `Ss!${hex}`;
 }
-async function fetchAllSchools():Promise<School[]>{
-  const rows:School[]=[]; const pageSize=1000;
-  for(let from=0;;from+=pageSize){
-    const {data,error}=await supabase.from('schools').select('id,name,level,province,municipality,town,verified').order('name').range(from,from+pageSize-1);
-    if(error) throw error; const batch=(data??[]) as School[]; rows.push(...batch); if(batch.length<pageSize) break;
-  }
-  return rows;
+function safeSchoolSearch(value:string){
+  return value.trim().replace(/[,()%_*]/g,' ').replace(/\s+/g,' ');
 }
-async function fetchAllProjects():Promise<Project[]>{
-  const rows:Project[]=[]; const pageSize=1000;
+async function fetchSchoolPage(search:string,province:string,level:SchoolLevelFilter,page:number){
+  const from=page*SCHOOL_PAGE_SIZE;
+  const to=from+SCHOOL_PAGE_SIZE-1;
+  let request=supabase
+    .from('schools')
+    .select('id,name,level,province,municipality,town,verified',{count:'exact'})
+    .order('name',{ascending:true})
+    .range(from,to);
+  const term=safeSchoolSearch(search);
+  if(term) request=request.or(`name.ilike.%${term}%,town.ilike.%${term}%,municipality.ilike.%${term}%`);
+  if(province!=='All provinces') request=request.eq('province',province);
+  if(level!=='all') request=request.eq('level',level);
+  const {data,error,count}=await request;
+  if(error) throw error;
+  return {rows:(data??[]) as School[],count:count??0};
+}
+async function fetchAllProjects():Promise<ProjectWithSchool[]>{
+  const rows:ProjectWithSchool[]=[]; const pageSize=1000;
   for(let from=0;;from+=pageSize){
-    const {data,error}=await supabase.from('projects').select('id,school_id,title,description,category,target_cents,status,priority').order('priority').range(from,from+pageSize-1);
-    if(error) throw error; const batch=(data??[]) as Project[]; rows.push(...batch); if(batch.length<pageSize) break;
+    const {data,error}=await supabase.from('projects').select('id,school_id,title,description,category,target_cents,status,priority,schools(id,name,level,province,municipality,town,verified)').order('priority').range(from,from+pageSize-1);
+    if(error) throw error; const batch=(data??[]) as unknown as ProjectWithSchool[]; rows.push(...batch); if(batch.length<pageSize) break;
   }
   return rows;
 }
@@ -68,8 +81,11 @@ export default function Page(){
   const [authError,setAuthError]=useState('');
   const [authMessage,setAuthMessage]=useState('');
   const [view,setView]=useState<View>('home');
-  const [schools,setSchools]=useState<School[]>([]);
-  const [projects,setProjects]=useState<Project[]>([]);
+  const [directorySchools,setDirectorySchools]=useState<School[]>([]);
+  const [schoolCount,setSchoolCount]=useState(0);
+  const [schoolPage,setSchoolPage]=useState(0);
+  const [schoolLoading,setSchoolLoading]=useState(false);
+  const [projects,setProjects]=useState<ProjectWithSchool[]>([]);
   const [memberships,setMemberships]=useState<UserMembership[]>([]);
   const [commitments,setCommitments]=useState<Commitment[]>([]);
   const [profile,setProfile]=useState<Profile|null>(null);
@@ -77,6 +93,7 @@ export default function Page(){
   const [profileSaving,setProfileSaving]=useState(false);
   const [profileSaved,setProfileSaved]=useState(false);
   const [query,setQuery]=useState('');
+  const [debouncedQuery,setDebouncedQuery]=useState('');
   const [province,setProvince]=useState('All provinces');
   const [level,setLevel]=useState<SchoolLevelFilter>('all');
   const [selectedSchool,setSelectedSchool]=useState<School|null>(null);
@@ -101,24 +118,46 @@ export default function Page(){
       setUser(sessionUser);
       setAuthReady(true);
       if(event==='SIGNED_OUT'){
-        setSchools([]); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
+        setDirectorySchools([]); setSchoolCount(0); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
       }
     });
     return ()=>{active=false;subscription.unsubscribe();};
   },[]);
 
+  useEffect(()=>{
+    const timer=setTimeout(()=>{
+      setSchoolPage(0);
+      setDebouncedQuery(query.trim());
+    },350);
+    return ()=>clearTimeout(timer);
+  },[query]);
+
+  useEffect(()=>{ setSchoolPage(0); },[province,level]);
+
+  useEffect(()=>{
+    if(!user||view!=='schools') return;
+    let active=true;
+    setSchoolLoading(true);
+    setLoadError('');
+    void fetchSchoolPage(debouncedQuery,province,level,schoolPage)
+      .then(({rows,count})=>{if(active){setDirectorySchools(rows);setSchoolCount(count);}})
+      .catch(error=>{if(active)setLoadError(error instanceof Error?error.message:'Could not search schools.');})
+      .finally(()=>{if(active)setSchoolLoading(false);});
+    return ()=>{active=false;};
+  },[user,view,debouncedQuery,province,level,schoolPage]);
+
   async function loadApp(activeUser:User){
     setLoading(true); setLoadError('');
     try{
-      const [schoolRows,projectRows,{data:m,error:mErr},{data:c,error:cErr},{data:p,error:pErr}]=await Promise.all([
-        fetchAllSchools(), fetchAllProjects(),
+      const [projectRows,{data:m,error:mErr},{data:c,error:cErr},{data:p,error:pErr}]=await Promise.all([
+        fetchAllProjects(),
         supabase.from('school_memberships').select('id,school_id,graduation_year,start_year,end_year,grade_left,verified,schools(id,name,level,province,municipality,town,verified)').eq('user_id',activeUser.id),
         supabase.from('commitments').select('id,school_id,amount_cents,frequency,status,payment_provider').eq('user_id',activeUser.id),
         supabase.from('profiles').select('id,phone,first_name,last_name,email').eq('id',activeUser.id).maybeSingle()
       ]);
       if(mErr) throw mErr; if(cErr) throw cErr; if(pErr) throw pErr;
       const profileRow=(p??{id:activeUser.id,phone:activeUser.phone??null,first_name:null,last_name:null,email:null}) as Profile;
-      setSchools(schoolRows); setProjects(projectRows); setMemberships((m??[]) as unknown as UserMembership[]); setCommitments((c??[]) as Commitment[]); setProfile(profileRow);
+      setProjects(projectRows); setMemberships((m??[]) as unknown as UserMembership[]); setCommitments((c??[]) as Commitment[]); setProfile(profileRow);
       setProfileDraft({first_name:profileRow.first_name??'',last_name:profileRow.last_name??'',email:profileRow.email??''});
     }catch(error){ setLoadError(error instanceof Error?error.message:'Could not load Skolo Saka.'); }
     finally{ setLoading(false); }
@@ -168,7 +207,7 @@ export default function Page(){
   async function signOut(){
     await supabase.auth.signOut();
     setUser(null); setView('home'); setPhone(''); setPin(''); setOtp(''); setAuthError(''); setAuthMessage(''); setAuthStep('login');
-    setSchools([]); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
+    setDirectorySchools([]); setSchoolCount(0); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
   }
 
   async function saveProfile(e?:FormEvent){
@@ -230,11 +269,13 @@ export default function Page(){
 
   const membershipMap=useMemo(()=>new Map(memberships.map(m=>[m.school_id,m])),[memberships]);
   const commitmentMap=useMemo(()=>new Map(commitments.filter(c=>c.status!=='cancelled').map(c=>[c.school_id,c])),[commitments]);
-  const mySchools=useMemo(()=>schools.filter(s=>membershipMap.has(s.id)),[schools,membershipMap]);
+  const mySchools=useMemo(()=>memberships.map(m=>m.schools).filter((s):s is School=>Boolean(s)),[memberships]);
   const mySchoolIds=useMemo(()=>new Set(memberships.map(m=>m.school_id)),[memberships]);
   const myProjects=useMemo(()=>projects.filter(p=>mySchoolIds.has(p.school_id)),[projects,mySchoolIds]);
   const monthly=commitments.filter(c=>c.status!=='cancelled').reduce((sum,c)=>sum+c.amount_cents,0)/100;
-  const filteredSchools=useMemo(()=>{const q=query.trim().toLowerCase();return schools.filter(s=>(!q||`${s.name} ${s.town??''} ${s.municipality??''} ${s.province}`.toLowerCase().includes(q))&&(province==='All provinces'||s.province===province)&&(level==='all'||s.level===level));},[schools,query,province,level]);
+  const schoolTotalPages=Math.max(1,Math.ceil(schoolCount/SCHOOL_PAGE_SIZE));
+  const schoolFrom=schoolCount===0?0:schoolPage*SCHOOL_PAGE_SIZE+1;
+  const schoolTo=Math.min((schoolPage+1)*SCHOOL_PAGE_SIZE,schoolCount);
   const displayName=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||user?.phone||'Alumnus';
 
   if(!authReady) return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Opening Skolo Saka…</h1></section></main>;
@@ -255,9 +296,9 @@ export default function Page(){
 
       {view==='home'&&<div className="page-content">{loading?<div className="state-message">Loading…</div>:memberships.length===0?<section className="first-time-card"><div><span className="eyebrow">Welcome</span><h1>Which schools made you?</h1><p>Add your school and the year and grade you left.</p><button className="primary" onClick={()=>setView('schools')}>Find my schools <ChevronRight size={18}/></button></div></section>:<><section className="welcome-row"><div><span className="eyebrow">Your account</span><h1>{profile?.first_name?`Hi, ${profile.first_name}.`:'Good to see you.'}</h1><p>{memberships.length} {memberships.length===1?'school':'schools'} connected.</p></div><button className="outline" onClick={()=>setView('schools')}><Plus size={17}/> Add school</button></section><section className="metric-grid"><Metric label="Schools" value={String(memberships.length)} note="Connected"/><Metric label="Monthly" value={`R${monthly}`} note="Payments not live"/><Metric label="Projects" value={String(myProjects.length)} note="Following"/></section><SectionHeader title="My schools" action="Manage" onClick={()=>setView('schools')}/><div className="my-school-grid">{mySchools.map((s,i)=>{const m=membershipMap.get(s.id)!;const c=commitmentMap.get(s.id);return <MySchoolCard key={s.id} school={s} year={m.graduation_year} grade={m.grade_left} amount={(c?.amount_cents||1000)/100} index={i} onRemove={()=>removeSchool(s.id)} onOpen={()=>setSelectedSchool(s)}/>;})}</div></>}</div>}
 
-      {view==='schools'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Schools</span><h1>Find your school.</h1></div><div className="directory-count"><strong>{loading?'…':schools.length.toLocaleString()}</strong><span>available</span></div></section><div className="directory-toolbar"><label className="directory-search"><Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search school or location"/></label><select value={province} onChange={e=>setProvince(e.target.value)}>{PROVINCES.map(p=><option key={p}>{p}</option>)}</select></div><div className="filter-pills">{(['all','primary','high','combined'] as SchoolLevelFilter[]).map(item=><button key={item} className={level===item?'active':''} onClick={()=>setLevel(item)}>{item==='all'?'All':item==='primary'?'Primary':item==='high'?'High':'Combined'}</button>)}</div>{loading?<div className="state-message">Loading…</div>:<div className="directory-layout"><div><div className="results-row"><b>{filteredSchools.length.toLocaleString()} results</b></div><div className="directory-list">{filteredSchools.map(s=>{const m=membershipMap.get(s.id);return <article className="directory-school" key={s.id}><button className="school-main" onClick={()=>setSelectedSchool(s)}><span className="school-badge">{initials(s.name)}</span><span className="school-copy"><b>{s.name}</b><small>{levelLabel(s.level)} · {s.town||s.municipality||s.province}</small><em><MapPin size={12}/>{s.province}{s.verified?' · Verified':''}</em></span></button>{m?<button className="remove-btn" disabled={savingSchool===s.id} onClick={()=>removeSchool(s.id)}><Minus size={16}/> Remove</button>:<button className="add-btn" onClick={()=>setSelectedSchool(s)}><Plus size={16}/> Add</button>}</article>;})}</div></div><aside className="my-selection-panel"><div className="panel-title"><div><span className="eyebrow">My schools</span><h3>{memberships.length} selected</h3></div><WalletCards size={20}/></div>{!mySchools.length?<p className="muted">Add a school from the directory.</p>:mySchools.map(s=>{const m=membershipMap.get(s.id)!;const c=commitmentMap.get(s.id);return <div className="selection-item" key={s.id}><div><b>{s.name}</b><small>{m.graduation_year||'Year not set'} · {m.grade_left?`Grade ${m.grade_left}`:'Grade not set'}</small></div><button aria-label={`Remove ${s.name}`} onClick={()=>removeSchool(s.id)}><X size={15}/></button><label>Monthly<select value={(c?.amount_cents||1000)/100} onChange={e=>updateAmount(s.id,Number(e.target.value))}>{[10,25,50,100,250,500].map(a=><option value={a} key={a}>R{a}</option>)}</select></label></div>;})}<div className="selection-total"><span>Total</span><strong>R{monthly}/month</strong></div></aside></div>}</div>}
+      {view==='schools'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Schools</span><h1>Find your school.</h1><p>Search the national directory by school name, town or municipality.</p></div><div className="directory-count"><strong>{schoolLoading?'…':schoolCount.toLocaleString()}</strong><span>matching schools</span></div></section><div className="directory-toolbar"><label className="directory-search"><Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="e.g. Mankweng High or Soweto"/></label><select value={province} onChange={e=>setProvince(e.target.value)}>{PROVINCES.map(p=><option key={p}>{p}</option>)}</select></div><div className="filter-pills">{(['all','primary','high','combined'] as SchoolLevelFilter[]).map(item=><button key={item} className={level===item?'active':''} onClick={()=>setLevel(item)}>{item==='all'?'All':item==='primary'?'Primary':item==='high'?'High':'Combined'}</button>)}</div>{schoolLoading?<div className="state-message">Searching schools…</div>:<div className="directory-layout"><div><div className="results-row"><b>{schoolCount.toLocaleString()} results</b><span>{schoolCount?`Showing ${schoolFrom.toLocaleString()}–${schoolTo.toLocaleString()}`:'Try another name or location'}</span></div><div className="directory-list">{directorySchools.map(s=>{const m=membershipMap.get(s.id);return <article className="directory-school" key={s.id}><button className="school-main" onClick={()=>setSelectedSchool(s)}><span className="school-badge">{initials(s.name)}</span><span className="school-copy"><b>{s.name}</b><small>{levelLabel(s.level)} · {s.town||s.municipality||s.province}</small><em><MapPin size={12}/>{s.province}{s.verified?' · Verified':''}</em></span></button>{m?<button className="remove-btn" disabled={savingSchool===s.id} onClick={()=>removeSchool(s.id)}><Minus size={16}/> Remove</button>:<button className="add-btn" onClick={()=>setSelectedSchool(s)}><Plus size={16}/> Add</button>}</article>;})}</div>{schoolCount>SCHOOL_PAGE_SIZE&&<div className="results-row"><button className="outline" disabled={schoolPage===0} onClick={()=>setSchoolPage(p=>Math.max(0,p-1))}><ChevronLeft size={16}/> Previous</button><span>Page {schoolPage+1} of {schoolTotalPages}</span><button className="outline" disabled={schoolPage+1>=schoolTotalPages} onClick={()=>setSchoolPage(p=>Math.min(schoolTotalPages-1,p+1))}>Next <ChevronRight size={16}/></button></div>}</div><aside className="my-selection-panel"><div className="panel-title"><div><span className="eyebrow">My schools</span><h3>{memberships.length} selected</h3></div><WalletCards size={20}/></div>{!mySchools.length?<p className="muted">Add a school from the directory.</p>:mySchools.map(s=>{const m=membershipMap.get(s.id)!;const c=commitmentMap.get(s.id);return <div className="selection-item" key={s.id}><div><b>{s.name}</b><small>{m.graduation_year||'Year not set'} · {m.grade_left?`Grade ${m.grade_left}`:'Grade not set'}</small></div><button aria-label={`Remove ${s.name}`} onClick={()=>removeSchool(s.id)}><X size={15}/></button><label>Monthly<select value={(c?.amount_cents||1000)/100} onChange={e=>updateAmount(s.id,Number(e.target.value))}>{[10,25,50,100,250,500].map(a=><option value={a} key={a}>R{a}</option>)}</select></label></div>;})}<div className="selection-total"><span>Total</span><strong>R{monthly}/month</strong></div></aside></div>}</div>}
 
-      {view==='projects'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Projects</span><h1>School projects.</h1></div></section>{myProjects.length>0&&<><SectionHeader title="My schools"/><ProjectGrid projects={myProjects} schools={schools}/></>}<SectionHeader title="All projects"/><ProjectGrid projects={projects} schools={schools}/></div>}
+      {view==='projects'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Projects</span><h1>School projects.</h1></div></section>{myProjects.length>0&&<><SectionHeader title="My schools"/><ProjectGrid projects={myProjects}/></>}<SectionHeader title="All projects"/><ProjectGrid projects={projects}/></div>}
 
       {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Everything else is optional.</p></div></section><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
     </section>
@@ -279,7 +320,7 @@ function NavButton({active,icon,label,badge,onClick}:{active:boolean;icon:ReactN
 function Metric({label,value,note}:{label:string;value:string;note:string}){return <article className="metric"><small>{label}</small><strong>{value}</strong><em>{note}</em></article>}
 function SectionHeader({title,action,onClick}:{title:string;action?:string;onClick?:()=>void}){return <div className="section-title"><h3>{title}</h3>{action&&<button onClick={onClick}>{action}<ChevronRight size={15}/></button>}</div>}
 function MySchoolCard({school,year,grade,amount,index,onRemove,onOpen}:{school:School;year:number|null;grade:number|null;amount:number;index:number;onRemove:()=>void;onOpen:()=>void}){return <article className={`my-school-card ${index===0?'featured':''}`}><button className="school-card-open" onClick={onOpen}><span className="school-badge large">{initials(school.name)}</span><div><small>{levelLabel(school.level)}</small><h3>{school.name}</h3><p>{school.town||school.municipality||school.province}</p></div><ChevronRight size={18}/></button><div className="school-mini-stats"><span><b>R{amount}</b><small>monthly</small></span><span><b>{year||'—'}</b><small>year left</small></span><span><b>{grade?`Grade ${grade}`:'—'}</b><small>grade left</small></span></div><button className="remove-school-link" onClick={onRemove}><Minus size={15}/> Remove school</button></article>}
-function ProjectGrid({projects,schools}:{projects:Project[];schools:School[]}){const sm=new Map(schools.map(s=>[s.id,s]));return <div className="projects-grid">{projects.length?projects.map(p=><article className="project-card" key={p.id}><div className="project-top"><span className="project-icon">{p.category?.toLowerCase().includes('sport')?'⚽':'🏫'}</span><span className="status-pill">{p.status}</span></div><small className="project-school">{sm.get(p.school_id)?.name||'School project'}</small><h3>{p.title}</h3><p>{p.description||'Project details will be published by the school.'}</p><div className="project-bottom"><b>Target {money(p.target_cents)}</b><span>Funding not live</span></div></article>):<div className="empty-state"><Trophy size={28}/><h3>No projects yet</h3></div>}</div>}
+function ProjectGrid({projects}:{projects:ProjectWithSchool[]}){return <div className="projects-grid">{projects.length?projects.map(p=><article className="project-card" key={p.id}><div className="project-top"><span className="project-icon">{p.category?.toLowerCase().includes('sport')?'⚽':'🏫'}</span><span className="status-pill">{p.status}</span></div><small className="project-school">{p.schools?.name||'School project'}</small><h3>{p.title}</h3><p>{p.description||'Project details will be published by the school.'}</p><div className="project-bottom"><b>Target {money(p.target_cents)}</b><span>Funding not live</span></div></article>):<div className="empty-state"><Trophy size={28}/><h3>No projects yet</h3></div>}</div>}
 function SchoolDrawer({school,membership,commitment,saving,onClose,onAdd,onRemove,onUpdate,onAmount}:{school:School;membership?:UserMembership;commitment?:Commitment;saving:boolean;onClose:()=>void;onAdd:(year:number|null,grade:number|null)=>void;onRemove:()=>void;onUpdate:(year:number|null,grade:number|null)=>void;onAmount:(amount:number)=>void}){
   const [year,setYear]=useState(membership?.graduation_year?.toString()||'');
   const [grade,setGrade]=useState(membership?.grade_left?.toString()||'');
