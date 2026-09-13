@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import {
   Building2, Check, ChevronLeft, ChevronRight, CircleUserRound, GraduationCap,
-  HeartHandshake, Home, LogOut, MapPin, Minus, Phone, Plus, Search, ShieldCheck,
+  HeartHandshake, Home, LogOut, MapPin, Minus, Phone, Plus, Search,
   Trophy, WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -15,12 +15,10 @@ type View = 'home' | 'schools' | 'projects' | 'profile';
 type SchoolLevelFilter = 'all' | 'primary' | 'high' | 'combined';
 type AuthStep = 'login' | 'register' | 'otp' | 'create-pin';
 type UserMembership = Membership & { schools?: School };
-
 type ProfileDraft = { first_name: string; last_name: string; email: string };
 
 const PROVINCES = ['All provinces','Eastern Cape','Free State','Gauteng','KwaZulu-Natal','Limpopo','Mpumalanga','North West','Northern Cape','Western Cape'];
 const GRADES = Array.from({length:12},(_,i)=>i+1);
-
 const money = (cents:number) => new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR',maximumFractionDigits:0}).format(cents/100);
 
 function levelLabel(level: School['level']) {
@@ -68,7 +66,6 @@ export default function Page(){
   const [authBusy,setAuthBusy]=useState(false);
   const [authError,setAuthError]=useState('');
   const [authMessage,setAuthMessage]=useState('');
-
   const [view,setView]=useState<View>('home');
   const [schools,setSchools]=useState<School[]>([]);
   const [projects,setProjects]=useState<Project[]>([]);
@@ -104,24 +101,19 @@ export default function Page(){
   }
 
   async function signIn(e?:FormEvent){
-    e?.preventDefault();
-    if(pin.length!==4) return;
+    e?.preventDefault(); if(pin.length!==4) return;
     setAuthBusy(true); setAuthError(''); setAuthMessage('');
     const normalized=normalizeSaPhone(phone);
     const password=await pinPassword(normalized,pin);
     const {data,error}=await supabase.auth.signInWithPassword({phone:normalized,password});
     setAuthBusy(false);
-    if(error||!data.user){
-      setAuthError('Couldn’t sign in. Verify by SMS to register or reset your PIN.');
-      return;
-    }
+    if(error||!data.user){ setAuthError('Couldn’t sign in. Verify by SMS to register or reset your PIN.'); return; }
     setPhone(normalized); setPin(''); setUser(data.user); setView('home');
     await loadApp(data.user);
   }
 
   async function sendOtp(e?:FormEvent){
-    e?.preventDefault();
-    setAuthBusy(true); setAuthError(''); setAuthMessage('');
+    e?.preventDefault(); setAuthBusy(true); setAuthError(''); setAuthMessage('');
     const normalized=normalizeSaPhone(phone);
     const {error}=await supabase.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:true}});
     setAuthBusy(false);
@@ -135,7 +127,7 @@ export default function Page(){
     const {data,error}=await supabase.auth.verifyOtp({phone:normalized,token:otp,type:'sms'});
     setAuthBusy(false);
     if(error||!data.user){ setAuthError(error?.message||'Could not verify this number.'); return; }
-    setUser(data.user); setOtp(''); setPin(''); setAuthStep('create-pin');
+    setOtp(''); setPin(''); setAuthStep('create-pin');
   }
 
   async function createPin(){
@@ -199,7 +191,7 @@ export default function Page(){
     if(!user) return;
     setMemberships(prev=>prev.map(m=>m.school_id===schoolId?{...m,graduation_year:year,grade_left:grade}:m));
     const {error}=await supabase.from('school_memberships').update({graduation_year:year,grade_left:grade}).eq('user_id',user.id).eq('school_id',schoolId);
-    if(error)setLoadError(error.message);
+    if(error)setLoadError(error.message); else setSelectedSchool(null);
   }
 
   async function updateAmount(schoolId:string,amount:number){
@@ -221,11 +213,9 @@ export default function Page(){
   const filteredSchools=useMemo(()=>{const q=query.trim().toLowerCase();return schools.filter(s=>(!q||`${s.name} ${s.town??''} ${s.municipality??''} ${s.province}`.toLowerCase().includes(q))&&(province==='All provinces'||s.province===province)&&(level==='all'||s.level===level));},[schools,query,province,level]);
   const displayName=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||user?.phone||'Alumnus';
 
-  if(!user){
-    if(authStep==='otp') return <OtpGate phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
-    if(authStep==='create-pin') return <PinCreate pin={pin} busy={authBusy} error={authError} setPin={setPin} onSave={createPin}/>;
-    return <AuthGate mode={authStep} phone={phone} pin={pin} busy={authBusy} error={authError} setPhone={setPhone} setPin={setPin} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{setAuthStep(mode);setAuthError('');setPin('');}}/>;
-  }
+  if(authStep==='otp') return <OtpGate phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
+  if(authStep==='create-pin') return <PinCreate pin={pin} busy={authBusy} error={authError} setPin={setPin} onSave={createPin}/>;
+  if(!user) return <AuthGate mode={authStep} phone={phone} pin={pin} busy={authBusy} error={authError} setPhone={setPhone} setPin={setPin} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{setAuthStep(mode);setAuthError('');setPin('');}}/>;
 
   return <main className="app-shell">
     <aside className="app-sidebar">
@@ -254,7 +244,7 @@ export default function Page(){
 
 function AuthGate({mode,phone,pin,busy,error,setPhone,setPin,onLogin,onRegister,onMode}:{mode:'login'|'register';phone:string;pin:string;busy:boolean;error:string;setPhone:(v:string)=>void;setPin:(v:string)=>void;onLogin:(e?:FormEvent)=>void;onRegister:(e?:FormEvent)=>void;onMode:(m:'login'|'register')=>void}){
   if(mode==='register') return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={()=>onMode('login')}><ChevronLeft size={17}/> Sign in</button><h1>Create account</h1><p>Enter your phone number. That’s all we need to register.</p><form onSubmit={onRegister}><PhoneField phone={phone} setPhone={setPhone}/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||phone.replace(/\D/g,'').length<9}>{busy?'Sending…':'Continue with SMS'} <ChevronRight size={18}/></button></form></section></main>;
-  return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label>4-digit PIN</label><input className="pin-input" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-switch" onClick={()=>onMode('register')}>Register or reset PIN</button></section></main>;
+  return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label>4-digit PIN</label><input className="pin-input" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-secondary" onClick={()=>onMode('register')}>Register or reset PIN</button></section></main>;
 }
 function PhoneField({phone,setPhone}:{phone:string;setPhone:(v:string)=>void}){return <><label>Mobile number</label><div className="auth-phone"><span>+27</span><input autoFocus inputMode="numeric" autoComplete="tel" value={phone.replace(/^\+27/,'')} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="82 123 4567"/></div></>}
 function OtpGate({phone,otp,busy,error,message,setOtp,onVerify,onBack}:{phone:string;otp:string;busy:boolean;error:string;message:string;setOtp:(v:string)=>void;onVerify:()=>void;onBack:()=>void}){return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={onBack}><ChevronLeft size={17}/> Change number</button><h1>Enter SMS code</h1><p>{message||phone}</p><input className="otp-single" autoFocus inputMode="numeric" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="123456"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||otp.length!==6} onClick={onVerify}>{busy?'Checking…':'Verify'} <ChevronRight size={18}/></button></section></main>}
