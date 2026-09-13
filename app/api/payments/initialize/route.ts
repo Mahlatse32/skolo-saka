@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     const db = adminSupabase();
     const total = allocations.reduce((sum, row) => sum + row.amountCents, 0);
-    const { data: instruction, error: instructionError } = await db.from('payment_instructions').insert({
+    const instructionValues = {
       user_id: auth.user.id,
       kind,
       cadence: kind === 'recurring' ? 'monthly' : null,
@@ -69,7 +69,14 @@ export async function POST(request: NextRequest) {
       currency: 'ZAR',
       status: 'pending',
       provider: 'paystack',
-    }).select('id').single();
+    };
+    // Atomically claim a caller-owned draft. A second checkout cannot reuse it.
+    const { data: instruction, error: instructionError } = body.draftId
+      ? await db.from('payment_instructions').update({ ...instructionValues, updated_at: new Date().toISOString() })
+          .eq('id', String(body.draftId)).eq('user_id', auth.user.id)
+          .eq('provider', 'draft').eq('status', 'pending').select('id').maybeSingle()
+      : await db.from('payment_instructions').insert(instructionValues).select('id').single();
+    if (body.draftId && !instructionError && !instruction) return NextResponse.json({ error: 'This saved arrangement is no longer available. Refresh Payments.' }, { status: 409 });
     if (instructionError || !instruction) throw instructionError || new Error('Could not create payment instruction.');
     instructionId = instruction.id;
 
