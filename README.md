@@ -9,8 +9,8 @@ Skolo Saka is a mobile-first alumni contribution network for South African prima
 - Next.js 16 + React 19 + TypeScript
 - Supabase Auth/Postgres/RLS backend
 - Primary and high schools supported from V1
-- Phone OTP wired for identity verification
-- 4-digit PIN used only as a trusted-device unlock
+- Phone OTP via Supabase Auth with signed WinSMS delivery hook
+- Phone + 4-digit PIN sign-in after SMS verification
 - Multi-school alumni memberships
 - R10/R25/R50/R100 monthly commitment intent per school
 - Projects, project updates, expenditure evidence, votes, invitations and immutable ledger model
@@ -19,12 +19,9 @@ Skolo Saka is a mobile-first alumni contribution network for South African prima
 
 ## Important production boundaries
 
-Two external services are intentionally not faked:
+SMS and payments require production account configuration. See [SMS setup](docs/sms-setup.md) and [Paystack setup](docs/paystack-setup.md).
 
-1. Supabase phone Auth needs an SMS provider before OTP messages can be delivered.
-2. A South African recurring-payment provider must be connected before a commitment can become active or any money can be displayed as collected.
-
-Until those integrations exist, commitments remain `pending` and verified project funding stays at R0.
+The WinSMS hook and Paystack checkout are implemented, but live SMS delivery, merchant approval, bank settlement, and cancellation must be verified before public fundraising. Never represent test contributions as live money. The payment page explicitly labels test checkout.
 
 ## Development
 
@@ -54,3 +51,4 @@ npm run dev
 ```
 
 The browser client uses the Supabase publishable key only. Never expose a service-role key to the frontend.
+

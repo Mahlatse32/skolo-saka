@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ schools, instructions: safeInstructions, legacy });
+    return NextResponse.json({ schools, instructions: safeInstructions, legacy, paymentMode: process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_live_') ? 'live' : process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_test_') ? 'test' : 'unavailable' });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not load payments.' }, { status: 500 });
   }

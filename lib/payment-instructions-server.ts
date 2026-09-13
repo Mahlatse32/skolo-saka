@@ -105,10 +105,10 @@ export async function recordInstructionCharge(args: {
   const instructionPatch = instruction.kind === 'one_off'
     ? { status: 'completed', provider_reference: args.reference, started_at: occurredAt, completed_at: occurredAt, updated_at: new Date().toISOString() }
     : { status: 'active', provider_reference: args.reference, started_at: occurredAt, cancelled_at: null, updated_at: new Date().toISOString() };
-  const { error: instructionError } = await db.from('payment_instructions').update(instructionPatch).eq('id', instruction.id);
+  const { error: instructionError } = await db.from('payment_instructions').update(instructionPatch).eq('id', instruction.id).not('status', 'in', '(cancelled,non_renewing,completed)');
   if (instructionError) throw instructionError;
 
-  if (instruction.kind === 'recurring') {
+  if (instruction.kind === 'recurring' && !['cancelled','non_renewing','completed'].includes(instruction.status)) {
     for (const allocation of allocations) {
       if (!allocation.commitment_id) continue;
       const { error } = await db.from('commitments').update({
@@ -119,7 +119,7 @@ export async function recordInstructionCharge(args: {
         started_at: occurredAt,
         cancelled_at: null,
         updated_at: new Date().toISOString(),
-      }).eq('id', allocation.commitment_id).eq('user_id', instruction.user_id);
+      }).eq('id', allocation.commitment_id).eq('user_id', instruction.user_id).eq('payment_instruction_id', instruction.id).neq('status', 'cancelled');
       if (error) throw error;
     }
   }
