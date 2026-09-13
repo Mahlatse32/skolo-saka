@@ -1,24 +1,90 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Landmark, Trophy, WalletCards } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Landmark, WalletCards } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+
+type SchoolRef={id:string;name:string};
+type MembershipRow={schools:SchoolRef|SchoolRef[]|null};
 
 export default function PaymentQuickLink(){
   const [visible,setVisible]=useState(false);
+  const [sideTarget,setSideTarget]=useState<Element|null>(null);
+  const [mobileTarget,setMobileTarget]=useState<Element|null>(null);
+  const [schoolMap,setSchoolMap]=useState<Map<string,string>>(new Map());
+
   useEffect(()=>{
     let active=true;
-    const path=window.location.pathname;
-    if(path.startsWith('/payments')||path.startsWith('/payment/')) return;
-    void supabase.auth.getSession().then(({data})=>{if(active)setVisible(Boolean(data.session));});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(active)setVisible(Boolean(session));});
+    async function syncSession(){
+      const {data}=await supabase.auth.getSession();
+      if(!active)return;
+      const signedIn=Boolean(data.session);
+      setVisible(signedIn);
+      if(signedIn){
+        const user=data.session?.user;
+        if(user){
+          const {data:rows}=await supabase.from('school_memberships').select('schools(id,name)').eq('user_id',user.id);
+          const next=new Map<string,string>();
+          ((rows||[]) as unknown as MembershipRow[]).forEach(row=>{
+            const school=Array.isArray(row.schools)?row.schools[0]:row.schools;
+            if(school)next.set(school.name.trim().toLowerCase(),school.id);
+          });
+          if(active)setSchoolMap(next);
+        }
+      }
+    }
+    void syncSession();
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
+      if(!active)return;
+      setVisible(Boolean(session));
+      if(session)void syncSession();
+    });
     return()=>{active=false;subscription.unsubscribe();};
   },[]);
-  if(!visible) return null;
-  const base:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:7,padding:'10px 13px',borderRadius:999,background:'#163f2c',color:'#fff',textDecoration:'none',fontWeight:800,fontFamily:'system-ui',boxShadow:'0 10px 28px rgba(22,63,44,.2)',border:'1px solid rgba(255,255,255,.15)',fontSize:14};
-  return <div style={{position:'fixed',right:18,bottom:84,zIndex:60,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end',maxWidth:430}}>
-    <a href="/projects" aria-label="View school projects" style={base}><Trophy size={16}/><span>Projects</span></a>
-    <a href="/my-schools" aria-label="View school finances" style={base}><Landmark size={16}/><span>School money</span></a>
-    <a href="/payments" aria-label="Manage payments" style={base}><WalletCards size={16}/><span>Payments</span></a>
-  </div>;
+
+  useEffect(()=>{
+    if(!visible)return;
+    const findTargets=()=>{
+      setSideTarget(document.querySelector('.app-sidebar .app-nav'));
+      setMobileTarget(document.querySelector('.mobile-nav'));
+    };
+    findTargets();
+    const observer=new MutationObserver(findTargets);
+    observer.observe(document.body,{childList:true,subtree:true});
+    return()=>observer.disconnect();
+  },[visible]);
+
+  useEffect(()=>{
+    if(!visible||window.location.pathname!=='/')return;
+    const openSchool=(event:MouseEvent)=>{
+      const target=event.target as HTMLElement|null;
+      const button=target?.closest('.my-school-card .school-card-open');
+      if(!button)return;
+      const name=button.querySelector('h3')?.textContent?.trim().toLowerCase();
+      if(!name)return;
+      const id=schoolMap.get(name);
+      if(!id)return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.location.href=`/school/${id}`;
+    };
+    document.addEventListener('click',openSchool,true);
+    return()=>document.removeEventListener('click',openSchool,true);
+  },[visible,schoolMap]);
+
+  const desktopItems=useMemo(()=><>
+    <button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>My schools</span></button>
+    <button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button>
+  </>,[]);
+  const mobileItems=useMemo(()=><>
+    <button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>Schools</span></button>
+    <button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button>
+  </>,[]);
+
+  if(!visible)return null;
+  return <>
+    {sideTarget?createPortal(desktopItems,sideTarget):null}
+    {mobileTarget?createPortal(mobileItems,mobileTarget):null}
+  </>;
 }
