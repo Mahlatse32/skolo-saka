@@ -26,12 +26,6 @@ export async function GET(request: NextRequest) {
     if (commitmentError) throw commitmentError;
     if (instructionError) throw instructionError;
 
-    const { data: contributions, error: contributionsError } = await db.from('ledger_transactions')
-      .select('id,amount_cents,currency,occurred_at,schools(name)')
-      .eq('user_id', auth.user.id).eq('type', 'contribution')
-      .order('occurred_at', { ascending: false }).limit(100);
-    if (contributionsError) throw contributionsError;
-
     const safeInstructions = (instructions || []).map((instruction: any) => ({
       id: instruction.id,
       kind: instruction.kind,
@@ -91,7 +85,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ contributions, schools, instructions: safeInstructions, legacy, paymentMode: process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_live_') ? 'live' : process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_test_') ? 'test' : 'unavailable' });
+    return NextResponse.json({ schools, instructions: safeInstructions, legacy, paymentMode: process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_live_') ? 'live' : process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_test_') ? 'test' : 'unavailable' });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not load payments.' }, { status: 500 });
   }
