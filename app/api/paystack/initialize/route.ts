@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       const plan=await paystackRequest<PlanResponse>('/plan',{method:'POST',body:JSON.stringify({name:`Skolo Saka – ${school?.name||'School'} – R${Number(commitment.amount_cents)/100}/month`,amount:Number(commitment.amount_cents),interval:'monthly',currency:'ZAR',description:'Monthly Skolo Saka school contribution',send_invoices:true,send_sms:false})});
       planCode=plan.data.plan_code;
     }
-    const origin=process.env.NEXT_PUBLIC_APP_URL||request.nextUrl.origin;
+    const origin=process.env.NEXT_APP_URL||request.nextUrl.origin;
     const initialized=await paystackRequest<InitializeResponse>('/transaction/initialize',{method:'POST',body:JSON.stringify({email,amount:Number(commitment.amount_cents),currency:'ZAR',plan:planCode,callback_url:`${origin}/payment/complete`,metadata:{commitment_id:commitment.id,user_id:user.id,school_id:commitment.school_id,source:'skolo_saka'}})});
     const {error:updateError}=await supabase.from('commitments').update({payment_provider:'paystack',payment_plan_code:planCode,provider_reference:initialized.data.reference,updated_at:new Date().toISOString()}).eq('id',commitment.id).eq('user_id',user.id);
     if(updateError) throw updateError;
