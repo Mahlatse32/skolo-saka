@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import {
@@ -59,6 +59,7 @@ async function fetchAllProjects():Promise<Project[]>{
 
 export default function Page(){
   const [user,setUser]=useState<User|null>(null);
+  const [authReady,setAuthReady]=useState(false);
   const [authStep,setAuthStep]=useState<AuthStep>('login');
   const [phone,setPhone]=useState('');
   const [pin,setPin]=useState('');
@@ -82,6 +83,29 @@ export default function Page(){
   const [loading,setLoading]=useState(false);
   const [loadError,setLoadError]=useState('');
   const [savingSchool,setSavingSchool]=useState<string|null>(null);
+
+  useEffect(()=>{
+    let active=true;
+    void supabase.auth.getSession().then(({data})=>{
+      if(!active) return;
+      const sessionUser=data.session?.user??null;
+      setUser(sessionUser);
+      setAuthReady(true);
+      if(sessionUser) void loadApp(sessionUser);
+    }).catch(()=>{
+      if(active) setAuthReady(true);
+    });
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(!active) return;
+      const sessionUser=session?.user??null;
+      setUser(sessionUser);
+      setAuthReady(true);
+      if(event==='SIGNED_OUT'){
+        setSchools([]); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
+      }
+    });
+    return ()=>{active=false;subscription.unsubscribe();};
+  },[]);
 
   async function loadApp(activeUser:User){
     setLoading(true); setLoadError('');
@@ -213,6 +237,7 @@ export default function Page(){
   const filteredSchools=useMemo(()=>{const q=query.trim().toLowerCase();return schools.filter(s=>(!q||`${s.name} ${s.town??''} ${s.municipality??''} ${s.province}`.toLowerCase().includes(q))&&(province==='All provinces'||s.province===province)&&(level==='all'||s.level===level));},[schools,query,province,level]);
   const displayName=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||user?.phone||'Alumnus';
 
+  if(!authReady) return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Opening Skolo Saka…</h1></section></main>;
   if(authStep==='otp') return <OtpGate phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
   if(authStep==='create-pin') return <PinCreate pin={pin} busy={authBusy} error={authError} setPin={setPin} onSave={createPin}/>;
   if(!user) return <AuthGate mode={authStep} phone={phone} pin={pin} busy={authBusy} error={authError} setPhone={setPhone} setPin={setPin} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{setAuthStep(mode);setAuthError('');setPin('');}}/>;
