@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/paystack-server';
-import { authenticatedUser, disablePaystackSubscription, fetchInstruction, fetchPaystackSubscription } from '@/lib/payment-instructions-server';
+import { authenticatedUser, disablePaystackSubscription, fetchInstruction, fetchPaystackSubscription, instructionAllocations } from '@/lib/payment-instructions-server';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +31,35 @@ export async function POST(request: NextRequest) {
 
       let code = instruction.provider_subscription_code || '';
       let token = instruction.provider_email_token || '';
+
+      // A user can leave Paystack before checkout finishes. In that case the
+      // instruction is local-only and must be cancellable so its schools are
+      // not permanently locked out of a future consolidated setup.
+      if (!code && (instruction.status === 'pending' || instruction.status === 'failed')) {
+        const now = new Date().toISOString();
+        const allocations = await instructionAllocations(db, instruction.id);
+        const { error: instructionError } = await db.from('payment_instructions').update({
+          status: 'cancelled', cancelled_at: now, updated_at: now,
+        }).eq('id', instruction.id);
+        if (instructionError) throw instructionError;
+
+        for (const allocation of allocations) {
+          if (!allocation.commitment_id) continue;
+          const { error: commitmentError } = await db.from('commitments').update({
+            status: 'pending',
+            payment_instruction_id: null,
+            payment_provider: null,
+            provider_reference: null,
+            payment_plan_code: null,
+            payment_subscription_code: null,
+            cancelled_at: null,
+            updated_at: now,
+          }).eq('id', allocation.commitment_id).eq('user_id', auth.user.id).eq('payment_instruction_id', instruction.id);
+          if (commitmentError) throw commitmentError;
+        }
+        return NextResponse.json({ success: true, status: 'cancelled' });
+      }
+
       if (!code) return NextResponse.json({ error: 'This monthly payment is not active yet.' }, { status: 400 });
       if (!token) {
         const fetched = await fetchPaystackSubscription(code);
