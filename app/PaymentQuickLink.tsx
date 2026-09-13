@@ -2,89 +2,33 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Landmark, WalletCards } from 'lucide-react';
+import { Landmark, MailCheck, WalletCards } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
-type SchoolRef={id:string;name:string};
-type MembershipRow={schools:SchoolRef|SchoolRef[]|null};
+type SchoolRef={id:string;name:string}; type MembershipRow={schools:SchoolRef|SchoolRef[]|null};
 
 export default function PaymentQuickLink(){
-  const [visible,setVisible]=useState(false);
-  const [sideTarget,setSideTarget]=useState<Element|null>(null);
-  const [mobileTarget,setMobileTarget]=useState<Element|null>(null);
-  const [schoolMap,setSchoolMap]=useState<Map<string,string>>(new Map());
+  const [user,setUser]=useState<User|null>(null); const [sideTarget,setSideTarget]=useState<Element|null>(null); const [mobileTarget,setMobileTarget]=useState<Element|null>(null); const [profileTarget,setProfileTarget]=useState<Element|null>(null); const [authTarget,setAuthTarget]=useState<Element|null>(null); const [schoolMap,setSchoolMap]=useState<Map<string,string>>(new Map()); const [profileEmail,setProfileEmail]=useState(''); const [securityMessage,setSecurityMessage]=useState(''); const [securityError,setSecurityError]=useState(''); const [securityBusy,setSecurityBusy]=useState(false);
+  const visible=Boolean(user);
 
   useEffect(()=>{
     let active=true;
-    async function syncSession(){
-      const {data}=await supabase.auth.getSession();
-      if(!active)return;
-      const signedIn=Boolean(data.session);
-      setVisible(signedIn);
-      if(signedIn){
-        const user=data.session?.user;
-        if(user){
-          const {data:rows}=await supabase.from('school_memberships').select('schools(id,name)').eq('user_id',user.id);
-          const next=new Map<string,string>();
-          ((rows||[]) as unknown as MembershipRow[]).forEach(row=>{
-            const school=Array.isArray(row.schools)?row.schools[0]:row.schools;
-            if(school)next.set(school.name.trim().toLowerCase(),school.id);
-          });
-          if(active)setSchoolMap(next);
-        }
-      }
-    }
-    void syncSession();
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
-      if(!active)return;
-      setVisible(Boolean(session));
-      if(session)void syncSession();
-    });
-    return()=>{active=false;subscription.unsubscribe();};
+    async function syncSession(){const {data}=await supabase.auth.getSession(); if(!active)return; const current=data.session?.user??null; setUser(current); if(current){const [{data:rows},{data:profile}]=await Promise.all([supabase.from('school_memberships').select('schools(id,name)').eq('user_id',current.id),supabase.from('profiles').select('email').eq('id',current.id).maybeSingle()]); const next=new Map<string,string>(); ((rows||[]) as unknown as MembershipRow[]).forEach(row=>{const school=Array.isArray(row.schools)?row.schools[0]:row.schools;if(school)next.set(school.name.trim().toLowerCase(),school.id);}); if(active){setSchoolMap(next);setProfileEmail(profile?.email||current.email||'');}}}
+    void syncSession(); const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(active){setUser(session?.user??null);if(session)void syncSession();}}); return()=>{active=false;subscription.unsubscribe();};
   },[]);
 
-  useEffect(()=>{
-    if(!visible)return;
-    const findTargets=()=>{
-      setSideTarget(document.querySelector('.app-sidebar .app-nav'));
-      setMobileTarget(document.querySelector('.mobile-nav'));
-    };
-    findTargets();
-    const observer=new MutationObserver(findTargets);
-    observer.observe(document.body,{childList:true,subtree:true});
-    return()=>observer.disconnect();
-  },[visible]);
+  useEffect(()=>{const findTargets=()=>{setSideTarget(document.querySelector('.app-sidebar .app-nav'));setMobileTarget(document.querySelector('.mobile-nav'));setProfileTarget(document.querySelector('.profile-grid'));setAuthTarget(document.querySelector('.auth-card'));};findTargets();const observer=new MutationObserver(findTargets);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
 
-  useEffect(()=>{
-    if(!visible||window.location.pathname!=='/')return;
-    const openSchool=(event:MouseEvent)=>{
-      const target=event.target as HTMLElement|null;
-      const button=target?.closest('.my-school-card .school-card-open');
-      if(!button)return;
-      const name=button.querySelector('h3')?.textContent?.trim().toLowerCase();
-      if(!name)return;
-      const id=schoolMap.get(name);
-      if(!id)return;
-      event.preventDefault();
-      event.stopPropagation();
-      window.location.href=`/school/${id}`;
-    };
-    document.addEventListener('click',openSchool,true);
-    return()=>document.removeEventListener('click',openSchool,true);
-  },[visible,schoolMap]);
+  useEffect(()=>{if(!visible||window.location.pathname!=='/')return;const openSchool=(event:MouseEvent)=>{const target=event.target as HTMLElement|null;const button=target?.closest('.my-school-card .school-card-open');if(!button)return;const name=button.querySelector('h3')?.textContent?.trim().toLowerCase();if(!name)return;const id=schoolMap.get(name);if(!id)return;event.preventDefault();event.stopPropagation();window.location.href=`/school/${id}`;};document.addEventListener('click',openSchool,true);return()=>document.removeEventListener('click',openSchool,true);},[visible,schoolMap]);
 
-  const desktopItems=useMemo(()=><>
-    <button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>My schools</span></button>
-    <button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button>
-  </>,[]);
-  const mobileItems=useMemo(()=><>
-    <button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>Schools</span></button>
-    <button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button>
-  </>,[]);
+  async function verifyEmail(){setSecurityBusy(true);setSecurityError('');setSecurityMessage('');const email=profileEmail.trim();if(!email){setSecurityBusy(false);setSecurityError('Add and save an email address in Personal details first.');return;}const redirect=`${window.location.origin}/`;const {error}=await supabase.auth.updateUser({email},{emailRedirectTo:redirect});setSecurityBusy(false);if(error){setSecurityError(error.message);return;}setSecurityMessage(`Verification email sent to ${email}. Open the link in that inbox to verify it.`);}
 
-  if(!visible)return null;
-  return <>
-    {sideTarget?createPortal(desktopItems,sideTarget):null}
-    {mobileTarget?createPortal(mobileItems,mobileTarget):null}
-  </>;
+  const desktopItems=useMemo(()=><><button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>My schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
+  const mobileItems=useMemo(()=><><button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>Schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
+  const emailVerified=Boolean(user?.email_confirmed_at&&user.email&&user.email.toLowerCase()===profileEmail.trim().toLowerCase());
+  const securityCard=visible?<article className="settings-card"><div className="settings-icon"><MailCheck/></div><h3>Account recovery</h3><p className="security-status">{emailVerified?`${user?.email} is verified and can be used to recover your account.`:profileEmail?`${profileEmail} is not yet verified for account recovery.`:'Add an email address so you can recover your account if you lose access to your phone or PIN.'}</p>{emailVerified?<span className="status-pill">✓ Email verified</span>:<button className="outline security-action" disabled={securityBusy} onClick={verifyEmail}>{securityBusy?'Sending…':'Verify recovery email'}</button>}{securityMessage&&<div className="security-success">{securityMessage}</div>}{securityError&&<div className="security-error">{securityError}</div>}</article>:null;
+  const recoveryLink=!visible&&authTarget?<button className="account-recovery-link" onClick={()=>{window.location.href='/auth/recover';}}>Recover account with email</button>:null;
+
+  return <>{visible&&sideTarget?createPortal(desktopItems,sideTarget):null}{visible&&mobileTarget?createPortal(mobileItems,mobileTarget):null}{visible&&profileTarget?createPortal(securityCard,profileTarget):null}{authTarget&&recoveryLink?createPortal(recoveryLink,authTarget):null}</>;
 }
