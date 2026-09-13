@@ -6,7 +6,7 @@ import type { User } from '@supabase/supabase-js';
 import {
   Building2, Check, ChevronLeft, ChevronRight, CircleUserRound, GraduationCap,
   HeartHandshake, Home, LogOut, MapPin, Minus, Phone, Plus, Search,
-  MoreHorizontal, Trophy, WalletCards, X
+  Trophy, WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Commitment, Membership, Profile, Project, School } from '@/lib/types';
@@ -100,7 +100,6 @@ export default function Page(){
   const [loading,setLoading]=useState(false);
   const [loadError,setLoadError]=useState('');
   const [savingSchool,setSavingSchool]=useState<string|null>(null);
-  const [mobileMoreOpen,setMobileMoreOpen]=useState(false);
 
   useEffect(()=>{
     let active=true;
@@ -292,7 +291,7 @@ export default function Page(){
   return <main className="app-shell">
     <aside className="app-sidebar">
       <button className="brand side-brand" onClick={()=>setView('home')}><span className="brand-mark"><GraduationCap size={20}/></span><span>Skolo Saka</span></button>
-      <nav className="app-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/my-schools" icon={<GraduationCap/>} label="My School" badge={memberships.length||undefined}/><NavLink href="/schools" icon={<Building2/>} label="Schools"/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" badge={myProjects.length||undefined} onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
+      <nav className="app-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/schools" icon={<Building2/>} label="Schools" badge={memberships.length||undefined}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" badge={myProjects.length||undefined} onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
       <div className="side-summary"><small>Monthly</small><strong>R{monthly}</strong><span>{memberships.length} {memberships.length===1?'school':'schools'}</span></div>
     </aside>
 
@@ -309,8 +308,7 @@ export default function Page(){
       {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Everything else is optional.</p></div></section><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
     </section>
 
-    {mobileMoreOpen&&<><button className="mobile-more-backdrop" aria-label="Close more menu" onClick={()=>setMobileMoreOpen(false)}/><div className="mobile-more-menu"><button onClick={()=>{setView('projects');setMobileMoreOpen(false);}}><Trophy/><span>Projects</span>{myProjects.length?<b className="nav-badge">{myProjects.length}</b>:null}</button><button onClick={()=>{setView('profile');setMobileMoreOpen(false);}}><CircleUserRound/><span>Profile</span></button></div></>}
-    <nav className="mobile-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>{setView('home');setMobileMoreOpen(false);}}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/my-schools" icon={<GraduationCap/>} label="My School"/><NavLink href="/schools" icon={<Building2/>} label="Schools"/><NavButton active={view==='projects'||view==='profile'||mobileMoreOpen} icon={<MoreHorizontal/>} label="More" onClick={()=>setMobileMoreOpen(open=>!open)}/></nav>
+    <nav className="mobile-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/schools" icon={<Building2/>} label="Schools" badge={memberships.length||undefined}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
     {selectedSchool&&<SchoolDrawer school={selectedSchool} membership={membershipMap.get(selectedSchool.id)} commitment={commitmentMap.get(selectedSchool.id)} saving={savingSchool===selectedSchool.id} onClose={()=>setSelectedSchool(null)} onAdd={(year,grade)=>addSchool(selectedSchool,year,grade)} onRemove={()=>removeSchool(selectedSchool.id)} onUpdate={(year,grade)=>updateMembership(selectedSchool.id,year,grade)} onAmount={amount=>updateAmount(selectedSchool.id,amount)}/>} 
   </main>;
 }

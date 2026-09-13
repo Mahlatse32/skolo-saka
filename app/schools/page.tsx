@@ -5,6 +5,7 @@ import { Check, ChevronLeft, ChevronRight, MapPin, Plus, Search, ShieldCheck, X 
 import SecondaryShell from '../SecondaryShell';
 import { supabase } from '@/lib/supabase';
 import styles from './schools.module.css';
+import mergedStyles from './merged-schools.module.css';
 
 type Level = 'all' | 'primary' | 'high' | 'combined';
 type School = { id:string; name:string; level:string; province:string; municipality:string|null; town:string|null; verified:boolean };
@@ -86,6 +87,10 @@ export default function SchoolsPage(){
   }
 
   const memberIds=useMemo(()=>new Set(memberships.map(m=>m.school_id)),[memberships]);
+  const mySchools=useMemo(()=>memberships.map(m=>{
+    const school=Array.isArray(m.schools)?m.schools[0]:m.schools;
+    return school?{...m,school}:null;
+  }).filter((item):item is Membership & {school:School}=>Boolean(item)),[memberships]);
   const totalPages=Math.max(1,Math.ceil(count/PAGE_SIZE));
   const from=count? page*PAGE_SIZE+1:0;
   const to=Math.min((page+1)*PAGE_SIZE,count);
@@ -106,9 +111,15 @@ export default function SchoolsPage(){
 
   return <SecondaryShell active="schools">
     <section className={styles.heading}>
-      <div><span className={styles.eyebrow}>School directory</span><h1>Find the exact school.</h1><p>Search by school name, town or municipality, then narrow it by province, school type and verification.</p></div>
-      <a className={styles.mySchools} href="/my-schools">My schools ({memberships.length})</a>
+      <div><span className={styles.eyebrow}>Schools</span><h1>The schools that made you.</h1><p>Open one of your schools or search the national directory to add another.</p></div>
     </section>
+
+    <section className={mergedStyles.mine} aria-labelledby="my-schools-heading">
+      <div className={mergedStyles.sectionHeading}><div><span className={styles.eyebrow}>My schools</span><h2 id="my-schools-heading">Your schools ({mySchools.length})</h2></div></div>
+      {mySchools.length?<div className={mergedStyles.mineGrid}>{mySchools.map(({school,graduation_year,grade_left})=><a className={mergedStyles.mineCard} key={school.id} href={`/school/${school.id}`}><div className={styles.badge}>{initials(school.name)}</div><div><h3>{school.name}</h3><p>{school.town||school.municipality||school.province}</p><small>{graduation_year||'Year not set'} · {grade_left?`Grade ${grade_left}`:'Grade not set'}{school.verified?' · Verified':''}</small></div><ChevronRight size={18}/></a>)}</div>:<div className={mergedStyles.emptyMine}>You have not added a school yet. Find it in the directory below.</div>}
+    </section>
+
+    <div className={mergedStyles.directoryHeading}><span className={styles.eyebrow}>School directory</span><h2>Find another school</h2><p>Search by school name, town or municipality, then narrow it by province, school type and verification.</p></div>
 
     <section className={styles.filters}>
       <label className={styles.search}><Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="School name, town or municipality"/><span>{query&&<button onClick={()=>setQuery('')} aria-label="Clear search"><X size={15}/></button>}</span></label>
