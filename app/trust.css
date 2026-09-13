@@ -1,0 +1,8 @@
+/* The signed-in Projects tab must only show projects belonging to the user's schools.
+   app/page.tsx currently renders a second global "All projects" grid after the user's
+   filtered grid; hide that legacy global block while the dedicated /projects route
+   provides the school-by-school filtered experience. */
+.page-content > .section-title:has(+ .projects-grid:last-child),
+.page-content > .projects-grid:last-child {
+  display: none;
+}
