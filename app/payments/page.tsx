@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import styles from './payments.module.css';
+import { SecondaryMobileNavigation } from '../SecondaryShell';
 
 type SchoolRow = {
   id: string;
@@ -270,5 +271,6 @@ export default function PaymentsPage() {
 
       {!!history.length && <section className={styles.historySection}><h2>Payment history</h2><div className={styles.historyCard}>{history.map(row => <div className={styles.historyRow} key={row.id}><div><b>{row.kind === 'recurring' ? 'Monthly payment' : 'Once-off payment'} · {row.allocations.map(a => a.school?.name).filter(Boolean).join(', ')}</b><small>{new Date(row.created_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>{row.status.replace('_',' ')}</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
     </div>
+    <SecondaryMobileNavigation active="payments"/>
   </main>;
 }

@@ -6,7 +6,7 @@ import type { User } from '@supabase/supabase-js';
 import {
   Building2, Check, ChevronLeft, ChevronRight, CircleUserRound, GraduationCap,
   HeartHandshake, Home, LogOut, MapPin, Minus, Phone, Plus, Search,
-  Trophy, WalletCards, X
+  MoreHorizontal, Trophy, WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Commitment, Membership, Profile, Project, School } from '@/lib/types';
@@ -100,6 +100,7 @@ export default function Page(){
   const [loading,setLoading]=useState(false);
   const [loadError,setLoadError]=useState('');
   const [savingSchool,setSavingSchool]=useState<string|null>(null);
+  const [mobileMoreOpen,setMobileMoreOpen]=useState(false);
 
   useEffect(()=>{
     let active=true;
@@ -122,6 +123,11 @@ export default function Page(){
       }
     });
     return ()=>{active=false;subscription.unsubscribe();};
+  },[]);
+
+  useEffect(()=>{
+    const requested=new URLSearchParams(window.location.search).get('view');
+    if(requested==='home'||requested==='schools'||requested==='projects'||requested==='profile') setView(requested);
   },[]);
 
   useEffect(()=>{
@@ -286,7 +292,7 @@ export default function Page(){
   return <main className="app-shell">
     <aside className="app-sidebar">
       <button className="brand side-brand" onClick={()=>setView('home')}><span className="brand-mark"><GraduationCap size={20}/></span><span>Skolo Saka</span></button>
-      <nav className="app-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavButton active={view==='schools'} icon={<Building2/>} label="Schools" badge={memberships.length||undefined} onClick={()=>setView('schools')}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" badge={myProjects.length||undefined} onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
+      <nav className="app-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/my-schools" icon={<GraduationCap/>} label="My School" badge={memberships.length||undefined}/><NavLink href="/schools" icon={<Building2/>} label="Schools"/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" badge={myProjects.length||undefined} onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
       <div className="side-summary"><small>Monthly</small><strong>R{monthly}</strong><span>{memberships.length} {memberships.length===1?'school':'schools'}</span></div>
     </aside>
 
@@ -303,7 +309,8 @@ export default function Page(){
       {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Everything else is optional.</p></div></section><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
     </section>
 
-    <nav className="mobile-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavButton active={view==='schools'} icon={<Building2/>} label="Schools" onClick={()=>setView('schools')}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
+    {mobileMoreOpen&&<><button className="mobile-more-backdrop" aria-label="Close more menu" onClick={()=>setMobileMoreOpen(false)}/><div className="mobile-more-menu"><button onClick={()=>{setView('projects');setMobileMoreOpen(false);}}><Trophy/><span>Projects</span>{myProjects.length?<b className="nav-badge">{myProjects.length}</b>:null}</button><button onClick={()=>{setView('profile');setMobileMoreOpen(false);}}><CircleUserRound/><span>Profile</span></button></div></>}
+    <nav className="mobile-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>{setView('home');setMobileMoreOpen(false);}}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/my-schools" icon={<GraduationCap/>} label="My School"/><NavLink href="/schools" icon={<Building2/>} label="Schools"/><NavButton active={view==='projects'||view==='profile'||mobileMoreOpen} icon={<MoreHorizontal/>} label="More" onClick={()=>setMobileMoreOpen(open=>!open)}/></nav>
     {selectedSchool&&<SchoolDrawer school={selectedSchool} membership={membershipMap.get(selectedSchool.id)} commitment={commitmentMap.get(selectedSchool.id)} saving={savingSchool===selectedSchool.id} onClose={()=>setSelectedSchool(null)} onAdd={(year,grade)=>addSchool(selectedSchool,year,grade)} onRemove={()=>removeSchool(selectedSchool.id)} onUpdate={(year,grade)=>updateMembership(selectedSchool.id,year,grade)} onAmount={amount=>updateAmount(selectedSchool.id,amount)}/>} 
   </main>;
 }
@@ -317,6 +324,7 @@ function OtpGate({phone,otp,busy,error,message,setOtp,onVerify,onBack}:{phone:st
 function PinCreate({pin,busy,error,setPin,onSave}:{pin:string;busy:boolean;error:string;setPin:(v:string)=>void;onSave:()=>void}){return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Create your PIN</h1><p>You’ll use this 4-digit PIN with your phone number next time.</p><input className="pin-input" autoFocus type="password" inputMode="numeric" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4} onClick={onSave}>{busy?'Saving…':'Continue'} <ChevronRight size={18}/></button></section></main>}
 function Brand(){return <div className="auth-brand"><span className="brand-mark"><GraduationCap size={22}/></span><b>Skolo Saka</b></div>}
 function NavButton({active,icon,label,badge,onClick}:{active:boolean;icon:ReactNode;label:string;badge?:number;onClick:()=>void}){return <button className={active?'active':''} onClick={onClick}>{icon}<span>{label}</span>{badge?<b className="nav-badge">{badge}</b>:null}</button>}
+function NavLink({href,icon,label,badge}:{href:string;icon:ReactNode;label:string;badge?:number}){return <a href={href}>{icon}<span>{label}</span>{badge?<b className="nav-badge">{badge}</b>:null}</a>}
 function Metric({label,value,note}:{label:string;value:string;note:string}){return <article className="metric"><small>{label}</small><strong>{value}</strong><em>{note}</em></article>}
 function SectionHeader({title,action,onClick}:{title:string;action?:string;onClick?:()=>void}){return <div className="section-title"><h3>{title}</h3>{action&&<button onClick={onClick}>{action}<ChevronRight size={15}/></button>}</div>}
 function MySchoolCard({school,year,grade,amount,index,onRemove,onOpen}:{school:School;year:number|null;grade:number|null;amount:number;index:number;onRemove:()=>void;onOpen:()=>void}){return <article className={`my-school-card ${index===0?'featured':''}`}><button className="school-card-open" onClick={onOpen}><span className="school-badge large">{initials(school.name)}</span><div><small>{levelLabel(school.level)}</small><h3>{school.name}</h3><p>{school.town||school.municipality||school.province}</p></div><ChevronRight size={18}/></button><div className="school-mini-stats"><span><b>R{amount}</b><small>monthly</small></span><span><b>{year||'—'}</b><small>year left</small></span><span><b>{grade?`Grade ${grade}`:'—'}</b><small>grade left</small></span></div><button className="remove-school-link" onClick={onRemove}><Minus size={15}/> Remove school</button></article>}
