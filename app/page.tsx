@@ -77,6 +77,12 @@ export default function Page(){
   const [phone,setPhone]=useState('');
   const [pin,setPin]=useState('');
   const [otp,setOtp]=useState('');
+  const [resendAt,setResendAt]=useState(0);
+  const [resendSeconds,setResendSeconds]=useState(0);
+  useEffect(()=>{
+    const tick=()=>setResendSeconds(Math.max(0,Math.ceil((resendAt-Date.now())/1000)));
+    tick(); const timer=setInterval(tick,1000); return ()=>clearInterval(timer);
+  },[resendAt]);
   const [authBusy,setAuthBusy]=useState(false);
   const [authError,setAuthError]=useState('');
   const [authMessage,setAuthMessage]=useState('');
@@ -181,21 +187,30 @@ export default function Page(){
   }
 
   async function sendOtp(e?:FormEvent){
-    e?.preventDefault(); setAuthBusy(true); setAuthError(''); setAuthMessage('');
+    e?.preventDefault();
+    if(authBusy) return;
+    if(Date.now()<resendAt){setAuthError('Please wait a minute before requesting another code.');return;}
     const normalized=normalizeSaPhone(phone);
-    const {error}=await supabase.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:true}});
-    setAuthBusy(false);
-    if(error){ setAuthError(error.message); return; }
-    setPhone(normalized); setOtp(''); setAuthStep('otp'); setAuthMessage(`Code sent to ${normalized}`);
+    if(!/^\+27[6-8]\d{8}$/.test(normalized)){setAuthError('Enter a valid South African mobile number, for example 082 123 4567.');return;}
+    setAuthBusy(true); setAuthError(''); setAuthMessage('');
+    try {
+      const {error}=await supabase.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:true}});
+      if(error){setAuthError(error.status===429?'Please wait a minute before requesting another code.':'We could not send your code. Check your number and try again.');return;}
+      setPhone(normalized); setOtp(''); setAuthStep('otp'); setResendAt(Date.now()+60000);
+      setAuthMessage(`An SMS code has been requested for ${normalized}. It may take a moment to arrive.`);
+    } catch {setAuthError('Could not connect. Check your connection and try again.');}
+    finally {setAuthBusy(false);}
   }
 
   async function verifyOtp(){
+    if(authBusy || !/^\d{6}$/.test(otp)) return;
     setAuthBusy(true); setAuthError('');
-    const normalized=normalizeSaPhone(phone);
-    const {data,error}=await supabase.auth.verifyOtp({phone:normalized,token:otp,type:'sms'});
-    setAuthBusy(false);
-    if(error||!data.user){ setAuthError(error?.message||'Could not verify this number.'); return; }
-    setOtp(''); setPin(''); setAuthStep('create-pin');
+    try {
+      const {data,error}=await supabase.auth.verifyOtp({phone:normalizeSaPhone(phone),token:otp,type:'sms'});
+      if(error||!data.user){setAuthError('That code is invalid or has expired. Check it or request a new code.');return;}
+      setOtp(''); setPin(''); setAuthStep('create-pin');
+    } catch {setAuthError('Could not connect. Please try again.');}
+    finally {setAuthBusy(false);}
   }
 
   async function createPin(){
@@ -284,7 +299,7 @@ export default function Page(){
   const displayName=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||user?.phone||'Alumnus';
 
   if(!authReady) return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Opening Skolo Saka…</h1></section></main>;
-  if(authStep==='otp') return <OtpGate phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
+  if(authStep==='otp') return <OtpGate resendSeconds={resendSeconds} onResend={()=>void sendOtp()} phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
   if(authStep==='create-pin') return <PinCreate pin={pin} busy={authBusy} error={authError} setPin={setPin} onSave={createPin}/>;
   if(!user) return <AuthGate mode={authStep} phone={phone} pin={pin} busy={authBusy} error={authError} setPhone={setPhone} setPin={setPin} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{setAuthStep(mode);setAuthError('');setPin('');}}/>;
 
@@ -305,7 +320,7 @@ export default function Page(){
 
       {view==='projects'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Projects</span><h1>School projects.</h1></div></section>{myProjects.length>0&&<><SectionHeader title="My schools"/><ProjectGrid projects={myProjects}/></>}<SectionHeader title="All projects"/><ProjectGrid projects={projects}/></div>}
 
-      {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Everything else is optional.</p></div></section><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
+      {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Add an email address before making a contribution.</p></div></section><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
     </section>
 
     <nav className="mobile-nav"><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Payments"/><NavLink href="/schools" icon={<Building2/>} label="Schools" badge={memberships.length||undefined}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/></nav>
@@ -318,7 +333,8 @@ function AuthGate({mode,phone,pin,busy,error,setPhone,setPin,onLogin,onRegister,
   return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label>4-digit PIN</label><input className="pin-input" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-secondary" onClick={()=>onMode('register')}>Register or reset PIN</button></section></main>;
 }
 function PhoneField({phone,setPhone}:{phone:string;setPhone:(v:string)=>void}){return <><label>Mobile number</label><div className="auth-phone"><span>+27</span><input autoFocus inputMode="numeric" autoComplete="tel" value={phone.replace(/^\+27/,'')} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="82 123 4567"/></div></>}
-function OtpGate({phone,otp,busy,error,message,setOtp,onVerify,onBack}:{phone:string;otp:string;busy:boolean;error:string;message:string;setOtp:(v:string)=>void;onVerify:()=>void;onBack:()=>void}){return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={onBack}><ChevronLeft size={17}/> Change number</button><h1>Enter SMS code</h1><p>{message||phone}</p><input className="otp-single" autoFocus inputMode="numeric" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="123456"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||otp.length!==6} onClick={onVerify}>{busy?'Checking…':'Verify'} <ChevronRight size={18}/></button></section></main>}
+function OtpGate({phone,otp,busy,error,message,setOtp,onVerify,onBack,onResend,resendSeconds}:{phone:string;otp:string;busy:boolean;error:string;message:string;setOtp:(v:string)=>void;onVerify:()=>void;onBack:()=>void;onResend:()=>void;resendSeconds:number}){return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" disabled={busy} onClick={onBack}><ChevronLeft size={17}/> Change number</button><h1>Enter SMS code</h1><p>{message||phone}</p><form onSubmit={e=>{e.preventDefault();onVerify();}}><input className="otp-single" aria-label="Six-digit SMS code" autoComplete="one-time-code" autoFocus inputMode="numeric" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="6-digit code"/>{error&&<div role="alert" className="message error">{error}</div>}<button className="primary full" disabled={busy||otp.length!==6} type="submit">{busy?'Checking…':'Verify'} <ChevronRight size={18}/></button></form><button className="auth-secondary" disabled={busy||resendSeconds>0} onClick={onResend}>{resendSeconds>0?`Resend code in ${resendSeconds}s`:'Resend SMS code'}</button></section></main>}
+
 function PinCreate({pin,busy,error,setPin,onSave}:{pin:string;busy:boolean;error:string;setPin:(v:string)=>void;onSave:()=>void}){return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Create your PIN</h1><p>You’ll use this 4-digit PIN with your phone number next time.</p><input className="pin-input" autoFocus type="password" inputMode="numeric" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4} onClick={onSave}>{busy?'Saving…':'Continue'} <ChevronRight size={18}/></button></section></main>}
 function Brand(){return <div className="auth-brand"><span className="brand-mark"><GraduationCap size={22}/></span><b>Skolo Saka</b></div>}
 function NavButton({active,icon,label,badge,onClick}:{active:boolean;icon:ReactNode;label:string;badge?:number;onClick:()=>void}){return <button className={active?'active':''} onClick={onClick}>{icon}<span>{label}</span>{badge?<b className="nav-badge">{badge}</b>:null}</button>}
@@ -333,3 +349,4 @@ function SchoolDrawer({school,membership,commitment,saving,onClose,onAdd,onRemov
   const yearValue=year?Number(year):null; const gradeValue=grade?Number(grade):null;
   return <div className="drawer-backdrop" onClick={onClose}><aside className="school-drawer" onClick={e=>e.stopPropagation()}><button className="drawer-close" onClick={onClose}><X/></button><span className="school-badge drawer-badge">{initials(school.name)}</span><span className="eyebrow">{levelLabel(school.level)}</span><h2>{school.name}</h2><p className="drawer-location"><MapPin size={15}/>{school.town||school.municipality||school.province}, {school.province}</p><div className="drawer-section"><h4>Your school details</h4><div className="drawer-controls"><label>Year you left<input inputMode="numeric" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="e.g. 2012"/></label><label>Grade when you left<select value={grade} onChange={e=>setGrade(e.target.value)}><option value="">Select grade</option>{GRADES.map(g=><option key={g} value={g}>Grade {g}</option>)}</select></label>{membership&&<label>Monthly amount<select value={(commitment?.amount_cents||1000)/100} onChange={e=>onAmount(Number(e.target.value))}>{[10,25,50,100,250,500].map(a=><option key={a} value={a}>R{a}</option>)}</select></label>}{membership?<><button className="primary full" onClick={()=>onUpdate(yearValue,gradeValue)}><Check size={16}/> Save details</button><button className="danger-outline full" onClick={onRemove}><Minus size={16}/> Remove school</button></>:<button className="primary full" disabled={saving} onClick={()=>onAdd(yearValue,gradeValue)}>{saving?'Adding…':'Add school'} <ChevronRight size={17}/></button>}</div></div><div className="drawer-note"><HeartHandshake size={18}/><span>Year and grade help us reconnect classmates and school cohorts later.</span></div></aside></div>
 }
+
