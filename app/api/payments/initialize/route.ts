@@ -76,21 +76,28 @@ export async function POST(request: NextRequest) {
       let commitmentId: string | null = null;
       if (kind === 'recurring') {
         const { data: existing, error: existingError } = await db.from('commitments')
-          .select('id,status,payment_instruction_id')
+          .select('id,status,payment_instruction_id,payment_provider,payment_subscription_code')
           .eq('user_id', auth.user.id)
           .eq('school_id', allocation.schoolId)
           .maybeSingle();
         if (existingError) throw existingError;
 
         if (existing?.id) {
-          if (existing.status === 'active' && existing.payment_instruction_id && existing.payment_instruction_id !== instruction.id) {
-            throw new Error('One of these schools already has an active consolidated monthly payment. Cancel it before creating another.');
+          const activeStatus = ['pending','active','paused'].includes(existing.status);
+          if (existing.payment_subscription_code && activeStatus && !existing.payment_instruction_id) {
+            throw new Error('One of these schools already has an active individual monthly payment. Cancel it before creating one combined payment.');
+          }
+          if (existing.payment_instruction_id && existing.payment_instruction_id !== instruction.id && activeStatus) {
+            throw new Error('One of these schools is already attached to another monthly payment. Cancel that payment before creating another.');
           }
           const { error: updateError } = await db.from('commitments').update({
             amount_cents: allocation.amountCents,
             status: 'pending',
             payment_provider: 'paystack',
             payment_instruction_id: instruction.id,
+            provider_reference: null,
+            payment_plan_code: null,
+            payment_subscription_code: null,
             cancelled_at: null,
             updated_at: new Date().toISOString(),
           }).eq('id', existing.id).eq('user_id', auth.user.id);
@@ -110,8 +117,11 @@ export async function POST(request: NextRequest) {
           if (insertError) throw insertError;
           if (inserted?.id) commitmentId = inserted.id;
           if (!commitmentId) {
-            const { data: reread, error: rereadError } = await db.from('commitments').select('id').eq('user_id', auth.user.id).eq('school_id', allocation.schoolId).maybeSingle();
+            const { data: reread, error: rereadError } = await db.from('commitments').select('id,status,payment_instruction_id,payment_subscription_code').eq('user_id', auth.user.id).eq('school_id', allocation.schoolId).maybeSingle();
             if (rereadError || !reread) throw rereadError || new Error('Could not prepare school commitment.');
+            if (reread.payment_subscription_code && ['pending','active','paused'].includes(reread.status) && !reread.payment_instruction_id) {
+              throw new Error('One of these schools already has an active individual monthly payment. Cancel it before creating one combined payment.');
+            }
             commitmentId = reread.id;
             const { error: relinkError } = await db.from('commitments').update({ payment_instruction_id: instruction.id }).eq('id', commitmentId);
             if (relinkError) throw relinkError;
