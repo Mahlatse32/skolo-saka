@@ -29,9 +29,11 @@ export async function POST(request: NextRequest) {
     if (!auth) return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
 
     const body = await request.json();
+    if (body.consent !== true) return NextResponse.json({ error: 'Confirm the payment terms before continuing.' }, { status: 400 });
     const kind = String(body.kind || '') as PaymentKind;
     if (kind !== 'one_off' && kind !== 'recurring') return NextResponse.json({ error: 'Choose once-off or monthly payment.' }, { status: 400 });
     const allocations = cleanAllocations(body.allocations);
+    if (!Array.isArray(body.allocations) || allocations.length !== body.allocations.length) return NextResponse.json({ error: 'Each school must have a valid contribution of at least R10. Please review your selection.' }, { status: 400 });
     if (!allocations.length) return NextResponse.json({ error: 'Choose at least one school.' }, { status: 400 });
     if (allocations.length > 20) return NextResponse.json({ error: 'Too many schools in one payment.' }, { status: 400 });
 
@@ -159,12 +161,15 @@ export async function POST(request: NextRequest) {
       email,
       amount: total,
       currency: 'ZAR',
+      channels: ['card'],
       callback_url: `${origin}/payment/complete`,
       metadata: {
         payment_instruction_id: instruction.id,
         user_id: auth.user.id,
         kind,
         source: 'skolo_saka_payment_center',
+        consent_version: 'card-contribution-v1',
+        consent_at: new Date().toISOString(),
       },
     };
     if (planCode) payload.plan = planCode;
@@ -183,6 +188,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (instructionId) {
       try {
+        await adminSupabase().from('commitments').update({ payment_instruction_id: null, payment_provider: null }).eq('payment_instruction_id', instructionId).eq('status', 'pending');
         await adminSupabase().from('payment_instructions').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', instructionId);
       } catch { /* best effort */ }
     }
