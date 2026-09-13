@@ -51,10 +51,10 @@ type Legacy = {
   school: { name: string; level: string } | null;
 };
 
-type Overview = { schools: SchoolRow[]; instructions: Instruction[]; legacy: Legacy[] };
+type Overview = { contributions: Array<{id:string;amount_cents:number;occurred_at:string;schools:{name:string}|{name:string}[]|null}>; paymentMode: 'live' | 'test' | 'unavailable'; schools: SchoolRow[]; instructions: Instruction[]; legacy: Legacy[] };
 type PaymentKind = 'recurring' | 'one_off';
 
-const money = (cents: number) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }).format(cents / 100);
+const money = (cents: number) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
 const activeStatuses = new Set(['pending','active','non_renewing']);
 
 function levelLabel(level: string) {
@@ -73,6 +73,8 @@ export default function PaymentsPage() {
   const [amounts, setAmounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [consent, setConsent] = useState(false);
+  useEffect(() => { setConsent(false); }, [kind, term, customTerm, selected, amounts]);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -161,6 +163,7 @@ export default function PaymentsPage() {
 
   async function startPayment() {
     setError(''); setMessage('');
+    if (!consent) { setError('Confirm the payment terms before continuing.'); return; }
     if (!selectedSchools.length) { setError('Choose at least one school.'); return; }
     const termMonths = resolvedTermMonths();
     if (kind === 'recurring' && termMonths !== null && (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > 1200)) {
@@ -172,6 +175,7 @@ export default function PaymentsPage() {
         method: 'POST',
         body: JSON.stringify({
           kind,
+          consent,
           termMonths,
           allocations: selectedSchools.map(school => ({ schoolId: school.id, amountCents: amounts[school.id] || 1000 })),
         }),
@@ -218,10 +222,11 @@ export default function PaymentsPage() {
       <div className={styles.topbar}><a className={styles.back} href="/">← Back to Skolo Saka</a><div className={styles.brand}>Skolo Saka</div></div>
 
       <section className={styles.hero}>
-        <div className={styles.heroMain}><span className={styles.eyebrow}>Payments</span><h1>One payment. All your schools.</h1><p>Choose your schools, decide whether this is once-off or monthly, and control the term yourself. Monthly support defaults to R10 per school forever until you cancel.</p></div>
+        <div className={styles.heroMain}><span className={styles.eyebrow}>Payments</span><h1>One payment. All your schools.</h1><p>Choose your schools, decide whether this is once-off or monthly, and control the term yourself. Monthly card contributions start at R10 per school. Cancel future payments whenever you need to.</p></div>
         <aside className={styles.heroAside}><strong>{money(total || 0)}</strong><span>{kind === 'recurring' ? 'one monthly payment across your selected schools' : 'one secure once-off payment across your selected schools'}</span></aside>
       </section>
 
+      {overview?.paymentMode !== 'live' && <div className={styles.notice} role="status">{overview?.paymentMode === 'test' ? 'Demo checkout: test payments only. No real contribution will be collected.' : 'Online payments are not available yet. Please return shortly.'}</div>}
       {error && <div className={styles.error}>{error}</div>}
       {message && <div className={styles.success}>{message}</div>}
       {!!overview?.legacy.length && <div className={styles.notice}>You still have older individual school subscriptions. Cancel those below before adding the same schools to one combined monthly payment.</div>}
@@ -235,8 +240,8 @@ export default function PaymentsPage() {
           </div>
 
           {kind === 'recurring' && <div className={styles.termRow}>
-            <div><label htmlFor="term">How long?</label><div className={styles.fineprint}>Forever is the default; a fixed term stops automatically after its billing cycles.</div></div>
-            <div style={{display:'flex',gap:8,alignItems:'center'}}><select id="term" value={term} onChange={e => setTerm(e.target.value)}><option value="forever">Forever</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="custom">Custom</option></select>{term === 'custom' && <input className={styles.customTerm} type="number" min={1} max={1200} value={customTerm} onChange={e => setCustomTerm(e.target.value)} aria-label="Custom term in months"/>}</div>
+            <div><label htmlFor="term">How long?</label><div className={styles.fineprint}>Continue until cancelled, or choose a fixed number of monthly payments.</div></div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}><select id="term" value={term} onChange={e => setTerm(e.target.value)}><option value="forever">Until cancelled</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="custom">Custom</option></select>{term === 'custom' && <input className={styles.customTerm} type="number" min={1} max={1200} value={customTerm} onChange={e => setCustomTerm(e.target.value)} aria-label="Custom term in months"/>}</div>
           </div>}
 
           <div className={styles.schools}>
@@ -246,7 +251,7 @@ export default function PaymentsPage() {
               return <label key={school.id} className={`${styles.schoolRow} ${isSelected ? styles.selected : ''} ${locked ? styles.disabled : ''}`}>
                 <input className={styles.check} type="checkbox" checked={isSelected} disabled={locked} onChange={() => toggleSchool(school.id)}/>
                 <div className={styles.schoolCopy}><b>{school.name}</b><small>{levelLabel(school.level)} · {school.town || school.province}</small></div>
-                {locked ? <div className={styles.locked}>Already in an active monthly payment</div> : <div className={styles.amountWrap}><span>R</span><input className={styles.amount} type="number" min={10} step={5} value={(amounts[school.id] || 1000) / 100} onChange={e => updateAmount(school.id, Number(e.target.value))} disabled={!isSelected}/></div>}
+                {locked ? <div className={styles.locked}>Already linked to a monthly arrangement</div> : <div className={styles.amountWrap}><span>R</span><input className={styles.amount} type="number" min={10} step={5} value={(amounts[school.id] || 1000) / 100} onChange={e => updateAmount(school.id, Number(e.target.value))} disabled={!isSelected}/></div>}
               </label>;
             })}
             {!overview?.schools.length && <div className={styles.empty}>Add your primary or high school to Skolo Saka first.</div>}
@@ -254,14 +259,14 @@ export default function PaymentsPage() {
         </section>
 
         <aside className={styles.summary}>
-          <div className={styles.summaryBox}><h3>Payment summary</h3><div className={styles.summaryLine}><span>Type</span><strong>{kind === 'recurring' ? 'Monthly' : 'Once-off'}</strong></div><div className={styles.summaryLine}><span>Schools</span><strong>{selectedSchools.length}</strong></div>{kind === 'recurring' && <div className={styles.summaryLine}><span>Term</span><strong>{resolvedTermMonths() ? `${resolvedTermMonths()} months` : 'Forever'}</strong></div>}<div className={styles.total}><span>{kind === 'recurring' ? 'One debit' : 'One payment'}</span><strong>{money(total)}</strong></div><p className={styles.summaryHint}>{kind === 'recurring' ? `Paystack creates one recurring subscription for the total, while Skolo Saka splits each successful payment between ${selectedSchools.length || 'your'} selected school${selectedSchools.length === 1 ? '' : 's'}.` : 'Skolo Saka records one provider payment and splits the contribution between your selected schools.'}</p><button className={styles.primary} onClick={startPayment} disabled={busy || selectedSchools.length === 0}>{busy ? 'Opening secure checkout…' : kind === 'recurring' ? 'Set up monthly payment' : 'Make once-off payment'}</button></div>
+          <div className={styles.summaryBox}><h3>Payment summary</h3><div className={styles.summaryLine}><span>Type</span><strong>{kind === 'recurring' ? 'Monthly' : 'Once-off'}</strong></div><div className={styles.summaryLine}><span>Schools</span><strong>{selectedSchools.length}</strong></div>{kind === 'recurring' && <div className={styles.summaryLine}><span>Term</span><strong>{resolvedTermMonths() ? `${resolvedTermMonths()} months` : 'Until cancelled'}</strong></div>}<div className={styles.total}><span>{kind === 'recurring' ? 'Monthly card payment' : 'One payment'}</span><strong>{money(total)}</strong></div><p className={styles.summaryHint}>{kind === 'recurring' ? `Your card is charged once a month. Your contribution is allocated to your selected schools. The first payment of ${money(total)} is collected at checkout.` : 'Your card is charged once today. Your contribution is allocated to your selected schools.'}</p><p className={styles.fineprint}>Card details are entered securely with Paystack. Processing fees are deducted from contributions.</p><label className={styles.consent}><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/><span>{kind === 'recurring' ? `I authorise ${money(total)} now and monthly ${resolvedTermMonths() ? `for ${resolvedTermMonths()} payments in total` : 'until I cancel'}. I can cancel future payments under Payments.` : `I confirm a once-off contribution of ${money(total)}.`}</span></label><button className={styles.primary} onClick={startPayment} disabled={busy || !consent || selectedSchools.length === 0 || overview?.paymentMode === 'unavailable'}>{busy ? 'Opening secure checkout…' : kind === 'recurring' ? 'Set up monthly payment' : 'Make once-off payment'}</button></div>
         </aside>
       </div>
 
       <section className={styles.activeSection}>
-        <h2>Active payments</h2>
+        <h2>Your payment arrangements</h2>
         <div className={styles.paymentGrid}>
-          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Combined monthly payment' : 'Once-off payment'}</h3><div className={styles.legacyTag}>{row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Forever'}</span>}</div><div className={styles.allocations}>{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{row.kind === 'recurring' && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing'} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : 'Cancel monthly payment'}</button>}</article>)}
+          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Combined monthly payment' : 'Once-off payment'}</h3><div className={styles.legacyTag}>{row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next payment: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{row.kind === 'recurring' && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing'} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : 'Cancel monthly payment'}</button>}</article>)}
 
           {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual payment'}</button></article>)}
 
@@ -269,7 +274,8 @@ export default function PaymentsPage() {
         </div>
       </section>
 
-      {!!history.length && <section className={styles.historySection}><h2>Payment history</h2><div className={styles.historyCard}>{history.map(row => <div className={styles.historyRow} key={row.id}><div><b>{row.kind === 'recurring' ? 'Monthly payment' : 'Once-off payment'} · {row.allocations.map(a => a.school?.name).filter(Boolean).join(', ')}</b><small>{new Date(row.created_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>{row.status.replace('_',' ')}</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
+      {!!overview?.contributions?.length && <section className={styles.historySection}><h2>Contributions received</h2><p className={styles.fineprint}>Your latest 100 school allocations, before processing fees. A combined payment appears once for each supported school.</p><div className={styles.historyCard}>{overview.contributions.map(row=><div className={styles.historyRow} key={row.id}><div><b>{(Array.isArray(row.schools)?row.schools[0]:row.schools)?.name || 'School contribution'}</b><small>{new Date(row.occurred_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>Received</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
+      {!!history.length && <section className={styles.historySection}><h2>Past payment arrangements</h2><div className={styles.historyCard}>{history.map(row => <div className={styles.historyRow} key={row.id}><div><b>{row.kind === 'recurring' ? 'Monthly payment' : 'Once-off payment'} · {row.allocations.map(a => a.school?.name).filter(Boolean).join(', ')}</b><small>{new Date(row.created_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>{row.status.replace('_',' ')}</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
     </div>
     <SecondaryMobileNavigation active="payments"/>
   </main>;
