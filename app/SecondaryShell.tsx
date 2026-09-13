@@ -9,7 +9,7 @@ export default function SecondaryShell({active,children}:{active:'schools'|'proj
       <a className="secondary-brand" href="/"><span><GraduationCap size={20}/></span><b>Skolo Saka</b></a>
       <nav>
         <a href="/"><Home/>Home</a>
-        <a className={active==='schools'?'active':''} href="/my-schools"><Building2/>My schools</a>
+        <a className={active==='schools'?'active':''} href="/schools"><Building2/>Schools</a>
         <a className={active==='projects'?'active':''} href="/projects"><Trophy/>Projects</a>
         <a className={active==='payments'?'active':''} href="/payments"><WalletCards/>Payments</a>
       </nav>

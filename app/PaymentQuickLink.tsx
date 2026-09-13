@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Landmark, MailCheck, WalletCards } from 'lucide-react';
+import { Building2, MailCheck, WalletCards } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
@@ -20,12 +20,13 @@ export default function PaymentQuickLink(){
 
   useEffect(()=>{const findTargets=()=>{setSideTarget(document.querySelector('.app-sidebar .app-nav'));setMobileTarget(document.querySelector('.mobile-nav'));setProfileTarget(document.querySelector('.profile-grid'));setAuthTarget(document.querySelector('.auth-card'));};findTargets();const observer=new MutationObserver(findTargets);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
 
-  useEffect(()=>{if(!visible||window.location.pathname!=='/')return;const openSchool=(event:MouseEvent)=>{const target=event.target as HTMLElement|null;const button=target?.closest('.my-school-card .school-card-open');if(!button)return;const name=button.querySelector('h3')?.textContent?.trim().toLowerCase();if(!name)return;const id=schoolMap.get(name);if(!id)return;event.preventDefault();event.stopPropagation();window.location.href=`/school/${id}`;};document.addEventListener('click',openSchool,true);return()=>document.removeEventListener('click',openSchool,true);},[visible,schoolMap]);
+  useEffect(()=>{if(!visible||window.location.pathname!=='/')return;const capture=(event:MouseEvent)=>{const target=event.target as HTMLElement|null;const schoolButton=target?.closest('.my-school-card .school-card-open');if(schoolButton){const name=schoolButton.querySelector('h3')?.textContent?.trim().toLowerCase();const id=name?schoolMap.get(name):undefined;if(id){event.preventDefault();event.stopPropagation();window.location.href=`/school/${id}`;return;}}
+    const button=target?.closest('button');if(!button)return;const text=(button.textContent||'').trim().toLowerCase();const isLegacySchoolAction=text==='schools'||text==='add school'||text==='manage'||text.includes('find my schools');if(isLegacySchoolAction){event.preventDefault();event.stopPropagation();window.location.href='/schools';}};document.addEventListener('click',capture,true);return()=>document.removeEventListener('click',capture,true);},[visible,schoolMap]);
 
   async function verifyEmail(){setSecurityBusy(true);setSecurityError('');setSecurityMessage('');const email=profileEmail.trim();if(!email){setSecurityBusy(false);setSecurityError('Add and save an email address in Personal details first.');return;}const redirect=`${window.location.origin}/`;const {error}=await supabase.auth.updateUser({email},{emailRedirectTo:redirect});setSecurityBusy(false);if(error){setSecurityError(error.message);return;}setSecurityMessage(`Verification email sent to ${email}. Open the link in that inbox to verify it.`);}
 
-  const desktopItems=useMemo(()=><><button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>My schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
-  const mobileItems=useMemo(()=><><button onClick={()=>{window.location.href='/my-schools';}}><Landmark/><span>Schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
+  const desktopItems=useMemo(()=><><button onClick={()=>{window.location.href='/schools';}}><Building2/><span>Schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
+  const mobileItems=useMemo(()=><><button onClick={()=>{window.location.href='/schools';}}><Building2/><span>Schools</span></button><button onClick={()=>{window.location.href='/payments';}}><WalletCards/><span>Payments</span></button></>,[]);
   const emailVerified=Boolean(user?.email_confirmed_at&&user.email&&user.email.toLowerCase()===profileEmail.trim().toLowerCase());
   const securityCard=visible?<article className="settings-card"><div className="settings-icon"><MailCheck/></div><h3>Account recovery</h3><p className="security-status">{emailVerified?`${user?.email} is verified and can be used to recover your account.`:profileEmail?`${profileEmail} is not yet verified for account recovery.`:'Add an email address so you can recover your account if you lose access to your phone or PIN.'}</p>{emailVerified?<span className="status-pill">✓ Email verified</span>:<button className="outline security-action" disabled={securityBusy} onClick={verifyEmail}>{securityBusy?'Sending…':'Verify recovery email'}</button>}{securityMessage&&<div className="security-success">{securityMessage}</div>}{securityError&&<div className="security-error">{securityError}</div>}</article>:null;
   const recoveryLink=!visible&&authTarget?<button className="account-recovery-link" onClick={()=>{window.location.href='/auth/recover';}}>Recover account with email</button>:null;
