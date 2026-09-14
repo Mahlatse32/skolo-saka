@@ -57,31 +57,17 @@ export default function SchoolsPage(){
     const seq=++requestSeq.current;
     setLoading(true); setError('');
     try{
-      const from=page*PAGE_SIZE;
-      const to=from+PAGE_SIZE-1;
-      let request=supabase.from('schools').select('id,name,level,province,municipality,town,verified',{count:'exact'});
-
-      const tokens=debouncedQuery.split(' ').map(clean).filter(Boolean).slice(0,6);
-      for(const token of tokens){
-        request=request.or(`name.ilike.%${token}%,town.ilike.%${token}%,municipality.ilike.%${token}%`);
-      }
-      if(debouncedArea){ request=request.or(`town.ilike.%${debouncedArea}%,municipality.ilike.%${debouncedArea}%`); }
-      if(province!=='All provinces')request=request.eq('province',province);
-      if(level!=='all')request=request.eq('level',level);
-      if(verifiedOnly)request=request.eq('verified',true);
-
-      const {data,error,count}=await request.order('name',{ascending:true}).range(from,to);
+      const {data,error}=await supabase.rpc('search_school_directory', {
+        p_query: debouncedQuery,
+        p_area: debouncedArea,
+        p_province: province === 'All provinces' ? null : province,
+        p_level: level === 'all' ? null : level,
+        p_verified_only: verifiedOnly,
+        p_page: page,
+      });
       if(error)throw error;
       if(seq!==requestSeq.current)return;
-
-      const term=debouncedQuery.toLowerCase();
-      const ranked=((data||[]) as School[]).slice().sort((a,b)=>{
-        if(!term)return a.name.localeCompare(b.name);
-        const an=a.name.toLowerCase(), bn=b.name.toLowerCase();
-        const score=(name:string)=>name===term?0:name.startsWith(term)?1:name.includes(term)?2:3;
-        return score(an)-score(bn)||a.name.localeCompare(b.name);
-      });
-      setRows(ranked); setCount(count||0);
+      setRows((data?.items || []) as School[]); setCount(Number(data?.total || 0));
     }catch(e){ if(seq===requestSeq.current)setError(e instanceof Error?e.message:'Could not search schools.'); }
     finally{ if(seq===requestSeq.current)setLoading(false); }
   }
@@ -130,7 +116,7 @@ export default function SchoolsPage(){
 
     <div className={styles.levels}>{(['all','primary','high','combined'] as Level[]).map(v=><button key={v} className={level===v?styles.active:''} onClick={()=>setLevel(v)}>{v==='all'?'All schools':v==='primary'?'Primary':v==='high'?'High school':'Combined'}</button>)}{hasFilters&&<button className={styles.clear} onClick={clearFilters}>Clear all</button>}</div>
 
-    <div className={styles.resultMeta}><div><b>{loading?'Searching…':`${count.toLocaleString()} ${count===1?'result':'results'}`}</b>{!loading&&count>0&&<span>Showing {from.toLocaleString()}–{to.toLocaleString()}</span>}</div><span>Tip: multiple search words are all required, so “mankweng high” is more precise than “mankweng”.</span></div>
+    <div className={styles.resultMeta}><div><b>{loading?'Searching…':`${count.toLocaleString()} ${count===1?'result':'results'}`}</b>{!loading&&count>0&&<span>Showing {from.toLocaleString()}–{to.toLocaleString()}</span>}</div><span>School-name matches appear first, followed by location matches. Multiple search words are all required.</span></div>
 
     {error&&<div className={styles.error}>{error}</div>}
     {loading?<div className={styles.loading}>Searching the national school directory…</div>:rows.length===0?<div className={styles.empty}><h3>No schools matched</h3><p>Try fewer words, remove a location filter or clear the province.</p>{hasFilters&&<button onClick={clearFilters}>Clear filters</button>}</div>:<div className={styles.list}>{rows.map(s=><article className={styles.school} key={s.id}><div className={styles.badge}>{initials(s.name)}</div><div className={styles.copy}><h3>{s.name}</h3><div>{levelLabel(s.level)} · {s.town||s.municipality||'Location not listed'}</div><small><MapPin size={12}/>{s.province}{s.municipality?` · ${s.municipality}`:''}{s.verified?' · Verified':''}</small></div>{memberIds.has(s.id)?<a className={styles.open} href={`/school/${s.id}`}><Check size={16}/> Open school</a>:<button className={styles.add} onClick={()=>{setPicker(s);setYear('');setGrade('');}}><Plus size={16}/> Add</button>}</article>)}</div>}
