@@ -5,6 +5,7 @@ import './globals.css';
 import './profile.css';
 import './trust.css';
 import './secondary.css';
+import './mobile-nav-badge.css';
 
 export const metadata: Metadata = {
   title: 'Skolo Saka — R10 a month for the school that made you',
