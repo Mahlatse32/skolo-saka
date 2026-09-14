@@ -237,7 +237,9 @@ export default function Page(){
     const {data,error}=await supabase.from('profiles').update({first_name:first||null,last_name:last||null,email,full_name:[first,last].filter(Boolean).join(' ')||null,updated_at:new Date().toISOString()}).eq('id',user.id).select('id,phone,first_name,last_name,email').single();
     setProfileSaving(false);
     if(error){ setLoadError(error.message); return; }
-    setProfile(data as Profile); setProfileSaved(true); setTimeout(()=>setProfileSaved(false),1800);
+    setProfile(data as Profile);
+    window.dispatchEvent(new CustomEvent('skolo:profile-email-saved',{detail:{email:data.email??''}}));
+    setProfileSaved(true); setTimeout(()=>setProfileSaved(false),1800);
   }
 
   async function loadPrivate(userId:string){
@@ -349,4 +351,3 @@ function SchoolDrawer({school,membership,commitment,saving,onClose,onAdd,onRemov
   const yearValue=year?Number(year):null; const gradeValue=grade?Number(grade):null;
   return <div className="drawer-backdrop" onClick={onClose}><aside className="school-drawer" onClick={e=>e.stopPropagation()}><button className="drawer-close" onClick={onClose}><X/></button><span className="school-badge drawer-badge">{initials(school.name)}</span><span className="eyebrow">{levelLabel(school.level)}</span><h2>{school.name}</h2><p className="drawer-location"><MapPin size={15}/>{school.town||school.municipality||school.province}, {school.province}</p><div className="drawer-section"><h4>Your school details</h4><div className="drawer-controls"><label>Year you left<input inputMode="numeric" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="e.g. 2012"/></label><label>Grade when you left<select value={grade} onChange={e=>setGrade(e.target.value)}><option value="">Select grade</option>{GRADES.map(g=><option key={g} value={g}>Grade {g}</option>)}</select></label>{membership&&<label>Monthly amount<select value={(commitment?.amount_cents||1000)/100} onChange={e=>onAmount(Number(e.target.value))}>{[10,25,50,100,250,500].map(a=><option key={a} value={a}>R{a}</option>)}</select></label>}{membership?<><button className="primary full" onClick={()=>onUpdate(yearValue,gradeValue)}><Check size={16}/> Save details</button><button className="danger-outline full" onClick={onRemove}><Minus size={16}/> Remove school</button></>:<button className="primary full" disabled={saving} onClick={()=>onAdd(yearValue,gradeValue)}>{saving?'Adding…':'Add school'} <ChevronRight size={17}/></button>}</div></div><div className="drawer-note"><HeartHandshake size={18}/><span>Year and grade help us reconnect classmates and school cohorts later.</span></div></aside></div>
 }
-
