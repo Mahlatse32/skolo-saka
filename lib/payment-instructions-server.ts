@@ -74,13 +74,14 @@ export async function recordInstructionCharge(args: {
 
   const allocations = await instructionAllocations(db, instruction.id);
   const allocationTotal = allocations.reduce((sum, row) => sum + Number(row.amount_cents), 0);
-  if (!allocations.length || allocationTotal !== Number(instruction.amount_cents)) {
+  if (allocations.length && allocationTotal !== Number(instruction.amount_cents)) {
     throw new Error('Payment allocation does not match the instruction total.');
   }
 
   const occurredAt = new Date(args.paidAt || Date.now()).toISOString();
-  for (const allocation of allocations) {
-    const externalReference = `${args.reference}:${allocation.school_id}`;
+  const entries = allocations.length ? allocations : [{ school_id: null, commitment_id: null, amount_cents: instruction.amount_cents }];
+  for (const allocation of entries) {
+    const externalReference = `${args.reference}:${allocation.school_id || 'unallocated'}`;
     const { error } = await db.from('ledger_transactions').upsert({
       user_id: instruction.user_id,
       school_id: allocation.school_id,
