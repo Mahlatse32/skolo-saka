@@ -14,7 +14,7 @@ export default function PaymentQuickLink(){
 
   useEffect(()=>{
     let active=true;
-    async function syncSession(){const {data}=await supabase.auth.getSession(); if(!active)return; const current=data.session?.user??null; setUser(current); if(current){const [{data:rows},{data:profile}]=await Promise.all([supabase.from('school_memberships').select('schools(id,name)').eq('user_id',current.id),supabase.from('profiles').select('email').eq('id',current.id).maybeSingle()]); const next=new Map<string,string>(); ((rows||[]) as unknown as MembershipRow[]).forEach(row=>{const school=Array.isArray(row.schools)?row.schools[0]:row.schools;if(school)next.set(school.name.trim().toLowerCase(),school.id);}); if(active){setSchoolMap(next);setProfileEmail(profile?.email||current.email||'');}}}
+    async function syncSession(){const {data}=await supabase.auth.getUser(); if(!active)return; const current=data.user??null; setUser(current); if(current){const [{data:rows},{data:profile}]=await Promise.all([supabase.from('school_memberships').select('schools(id,name)').eq('user_id',current.id),supabase.from('profiles').select('email').eq('id',current.id).maybeSingle()]); const next=new Map<string,string>(); ((rows||[]) as unknown as MembershipRow[]).forEach(row=>{const school=Array.isArray(row.schools)?row.schools[0]:row.schools;if(school)next.set(school.name.trim().toLowerCase(),school.id);}); if(active){setSchoolMap(next);setProfileEmail(profile?.email||current.email||'');}}}
     void syncSession(); const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(active){setUser(session?.user??null);if(session)void syncSession();}}); return()=>{active=false;subscription.unsubscribe();};
   },[]);
 
