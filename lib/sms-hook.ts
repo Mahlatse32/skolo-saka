@@ -51,8 +51,9 @@ export async function handleSmsHook(request: Request, config: {
       cache: 'no-store',
     });
     const result = await response.json();
-    // A 200 response can still contain a rejected recipient (e.g. insufficient credits).
-    if (!response.ok || result.recipientResults?.length !== 1 || result.recipientResults[0]?.accepted !== true) {
+    // WinSMS acknowledges a successful submission with HTTP 200 and statusCode 200.
+    // Its response does not contain Twilio-style recipientResults/accepted fields.
+    if (!response.ok || result?.statusCode !== 200) {
       return hookError(502, 'We could not send your SMS. Please try again later.');
     }
     return Response.json({});
