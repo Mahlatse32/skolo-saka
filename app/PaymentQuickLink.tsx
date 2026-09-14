@@ -18,12 +18,34 @@ export default function PaymentQuickLink(){
     void syncSession(); const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(active){setUser(session?.user??null);if(session)void syncSession();}}); return()=>{active=false;subscription.unsubscribe();};
   },[]);
 
+  useEffect(()=>{
+    const syncProfileEmail=(event:Event)=>{
+      const email=(event as CustomEvent<{email?:string}>).detail?.email?.trim()||'';
+      setProfileEmail(email); setSecurityError(''); setSecurityMessage('');
+    };
+    window.addEventListener('skolo:profile-email-saved',syncProfileEmail);
+    return()=>window.removeEventListener('skolo:profile-email-saved',syncProfileEmail);
+  },[]);
+
   useEffect(()=>{const findTargets=()=>{setProfileTarget(document.querySelector('.profile-grid'));setAuthTarget(document.querySelector('.auth-card'));};findTargets();const observer=new MutationObserver(findTargets);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
 
   useEffect(()=>{if(!visible||window.location.pathname!=='/')return;const capture=(event:MouseEvent)=>{const target=event.target as HTMLElement|null;const schoolButton=target?.closest('.my-school-card .school-card-open');if(schoolButton){const name=schoolButton.querySelector('h3')?.textContent?.trim().toLowerCase();const id=name?schoolMap.get(name):undefined;if(id){event.preventDefault();event.stopPropagation();window.location.href=`/school/${id}`;return;}}
     const button=target?.closest('button');if(!button)return;const text=(button.textContent||'').trim().toLowerCase();const isLegacySchoolAction=text==='schools'||text==='add school'||text==='manage'||text.includes('find my schools');if(isLegacySchoolAction){event.preventDefault();event.stopPropagation();window.location.href='/schools';}};document.addEventListener('click',capture,true);return()=>document.removeEventListener('click',capture,true);},[visible,schoolMap]);
 
-  async function verifyEmail(){setSecurityBusy(true);setSecurityError('');setSecurityMessage('');const email=profileEmail.trim();if(!email){setSecurityBusy(false);setSecurityError('Add and save an email address in Personal details first.');return;}const redirect=`${window.location.origin}/`;const {error}=await supabase.auth.updateUser({email},{emailRedirectTo:redirect});setSecurityBusy(false);if(error){setSecurityError(error.message);return;}setSecurityMessage(`Verification email sent to ${email}. Open the link in that inbox to verify it.`);}
+  async function verifyEmail(){
+    if(!user)return;
+    setSecurityBusy(true);setSecurityError('');setSecurityMessage('');
+    const {data:profile,error:profileError}=await supabase.from('profiles').select('email').eq('id',user.id).maybeSingle();
+    if(profileError){setSecurityBusy(false);setSecurityError('Could not load your saved email. Please try again.');return;}
+    const email=profile?.email?.trim()||user.email?.trim()||'';
+    setProfileEmail(email);
+    if(!email){setSecurityBusy(false);setSecurityError('Add and save an email address in Personal details first.');return;}
+    const redirect=`${window.location.origin}/?view=profile`;
+    const {error}=await supabase.auth.updateUser({email},{emailRedirectTo:redirect});
+    setSecurityBusy(false);
+    if(error){setSecurityError(error.message);return;}
+    setSecurityMessage(`Verification email sent to ${email}. Open the link in that inbox to verify it.`);
+  }
 
   const emailVerified=Boolean(user?.email_confirmed_at&&user.email&&user.email.toLowerCase()===profileEmail.trim().toLowerCase());
   const securityCard=visible?<article className="settings-card"><div className="settings-icon"><MailCheck/></div><h3>Account recovery</h3><p className="security-status">{emailVerified?`${user?.email} is verified and can be used to recover your account.`:profileEmail?`${profileEmail} is not yet verified for account recovery.`:'Add an email address so you can recover your account if you lose access to your phone or PIN.'}</p>{emailVerified?<span className="status-pill">✓ Email verified</span>:<button className="outline security-action" disabled={securityBusy} onClick={verifyEmail}>{securityBusy?'Sending…':'Verify recovery email'}</button>}{securityMessage&&<div className="security-success">{securityMessage}</div>}{securityError&&<div className="security-error">{securityError}</div>}</article>:null;
