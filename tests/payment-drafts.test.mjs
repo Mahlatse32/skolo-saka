@@ -7,7 +7,7 @@ import ts from 'typescript';
 function route(path, auth, db, provider = () => { throw new Error('Unexpected payment provider call'); }) {
   const exports = {};
   const code = ts.transpileModule(readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  vm.runInNewContext(code, { exports, Date, Set, Number, Error, process: { env: {} }, require(name) {
+  vm.runInNewContext(code, { exports, Date, Set, Number, Error, process: { env: { NEXT_APP_URL: 'https://skolo-saka-arnx.vercel.app' } }, require(name) {
     if (name === 'next/server') return { NextResponse: { json: (body, options) => ({ body, status: options?.status || 200 }) } };
     if (name.includes('payment-instructions-server')) return { authenticatedUser: async () => auth };
     return { adminSupabase: () => db, paystackRequest: provider };
@@ -69,6 +69,7 @@ for (const kind of ['one_off', 'recurring']) {
     assert.equal(saved[0].user_id, 'owner');
     const checkout = calls.find(c => c[0] === '/transaction/initialize')[1];
     assert.equal(checkout.amount, 2350);
+    assert.equal(checkout.callback_url, 'https://www.skolosaka.co.za/payment/complete');
     assert.equal(checkout.metadata.payment_instruction_id, 'instruction-1');
     assert.equal(checkout.plan, kind === 'recurring' ? 'plan-1' : undefined);
     assert.equal(calls.length, kind === 'recurring' ? 2 : 1);
