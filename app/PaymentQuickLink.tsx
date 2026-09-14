@@ -27,7 +27,7 @@ export default function PaymentQuickLink(){
     return()=>window.removeEventListener('skolo:profile-email-saved',syncProfileEmail);
   },[]);
 
-  useEffect(()=>{const findTargets=()=>{setProfileTarget(document.querySelector('.profile-grid'));setAuthTarget(document.querySelector('.auth-card'));};findTargets();const observer=new MutationObserver(findTargets);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
+  useEffect(()=>{const findTargets=()=>{setProfileTarget(document.querySelector('.profile-grid'));setAuthTarget(window.location.pathname==='/'?document.querySelector('.auth-card'):null);};findTargets();const observer=new MutationObserver(findTargets);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
 
   useEffect(()=>{if(!visible||window.location.pathname!=='/')return;const capture=(event:MouseEvent)=>{const target=event.target as HTMLElement|null;const schoolButton=target?.closest('.my-school-card .school-card-open');if(schoolButton){const name=schoolButton.querySelector('h3')?.textContent?.trim().toLowerCase();const id=name?schoolMap.get(name):undefined;if(id){event.preventDefault();event.stopPropagation();window.location.href=`/school/${id}`;return;}}
     const button=target?.closest('button');if(!button)return;const text=(button.textContent||'').trim().toLowerCase();const isLegacySchoolAction=text==='schools'||text==='add school'||text==='manage'||text.includes('find my schools');if(isLegacySchoolAction){event.preventDefault();event.stopPropagation();window.location.href='/schools';}};document.addEventListener('click',capture,true);return()=>document.removeEventListener('click',capture,true);},[visible,schoolMap]);
