@@ -1,0 +1,19 @@
+@media (max-width: 760px) {
+  .mobile-nav button,
+  .mobile-nav a {
+    position: relative;
+  }
+
+  .mobile-nav .nav-badge {
+    position: absolute;
+    top: 1px;
+    left: calc(50% + 7px);
+    margin: 0;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border: 2px solid var(--deep);
+    font-size: 9px;
+    line-height: 1;
+  }
+}
