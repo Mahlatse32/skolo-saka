@@ -32,9 +32,11 @@ export async function POST(request: NextRequest) {
     if (body.consent !== true) return NextResponse.json({ error: 'Confirm the payment terms before continuing.' }, { status: 400 });
     const kind = String(body.kind || '') as PaymentKind;
     if (kind !== 'one_off' && kind !== 'recurring') return NextResponse.json({ error: 'Choose once-off or monthly payment.' }, { status: 400 });
-    const allocations = cleanAllocations(body.allocations);
-    if (!Array.isArray(body.allocations) || allocations.length !== body.allocations.length) return NextResponse.json({ error: 'Each school must have a valid contribution of at least R10. Please review your selection.' }, { status: 400 });
-    if (!allocations.length) return NextResponse.json({ error: 'Choose at least one school.' }, { status: 400 });
+    const requestedAllocations = body.allocations ?? [];
+    const allocations = cleanAllocations(requestedAllocations);
+    if (!Array.isArray(requestedAllocations) || allocations.length !== requestedAllocations.length) return NextResponse.json({ error: 'Each school must have a valid contribution of at least R10. Please review your selection.' }, { status: 400 });
+    const total = allocations.length ? allocations.reduce((sum, row) => sum + row.amountCents, 0) : body.amountCents;
+    if (!Number.isSafeInteger(total) || total < 1000 || total > 100_000_000) return NextResponse.json({ error: 'Enter a contribution between R10 and R1,000,000.' }, { status: 400 });
     if (allocations.length > 20) return NextResponse.json({ error: 'Too many schools in one payment.' }, { status: 400 });
 
     const rawTerm = body.termMonths;
@@ -43,23 +45,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Choose a term between 1 and 1200 months, or Forever.' }, { status: 400 });
     }
 
-    const schoolIds = allocations.map(row => row.schoolId);
-    const { data: memberships, error: membershipError } = await auth.supabase
-      .from('school_memberships')
-      .select('school_id')
-      .eq('user_id', auth.user.id)
-      .in('school_id', schoolIds);
-    if (membershipError) throw membershipError;
-    const allowed = new Set((memberships || []).map(row => row.school_id));
-    if (allowed.size !== schoolIds.length) return NextResponse.json({ error: 'One or more schools are not linked to your account.' }, { status: 403 });
+    if (allocations.length) {
+      const schoolIds = allocations.map(row => row.schoolId);
+      const { data: memberships, error: membershipError } = await auth.supabase
+        .from('school_memberships')
+        .select('school_id')
+        .eq('user_id', auth.user.id)
+        .in('school_id', schoolIds);
+      if (membershipError) throw membershipError;
+      const allowed = new Set((memberships || []).map(row => row.school_id));
+      if (allowed.size !== schoolIds.length) return NextResponse.json({ error: 'One or more schools are not linked to your account.' }, { status: 403 });
 
-    const { data: profile, error: profileError } = await auth.supabase.from('profiles').select('email').eq('id', auth.user.id).maybeSingle();
-    if (profileError) throw profileError;
-    const email = profile?.email?.trim() || auth.user.email?.trim();
-    if (!email) return NextResponse.json({ error: 'Add your email address in Profile before setting up payment.' }, { status: 400 });
+    }
+
+    let email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (!email) {
+      email = auth.user.email?.trim() || '';
+      if (!email) {
+        const { data: profile, error: profileError } = await auth.supabase.from('profiles').select('email').eq('id', auth.user.id).maybeSingle();
+        if (profileError) throw profileError;
+        email = profile?.email?.trim() || '';
+      }
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return NextResponse.json({ error: 'Enter an email for your payment receipt below the amount.' }, { status: 400 });
 
     const db = adminSupabase();
-    const total = allocations.reduce((sum, row) => sum + row.amountCents, 0);
     const instructionValues = {
       user_id: auth.user.id,
       kind,
@@ -140,15 +150,17 @@ export async function POST(request: NextRequest) {
       allocationRows.push({ payment_instruction_id: instruction.id, school_id: allocation.schoolId, commitment_id: commitmentId, amount_cents: allocation.amountCents });
     }
 
-    const { error: allocationError } = await db.from('payment_instruction_allocations').insert(allocationRows);
-    if (allocationError) throw allocationError;
+    if (allocationRows.length) {
+      const { error: allocationError } = await db.from('payment_instruction_allocations').insert(allocationRows);
+      if (allocationError) throw allocationError;
+    }
 
     let planCode: string | null = null;
     if (kind === 'recurring') {
       const plan = await paystackRequest<PlanResponse>('/plan', {
         method: 'POST',
         body: JSON.stringify({
-          name: `Skolo Saka – ${allocations.length} ${allocations.length === 1 ? 'school' : 'schools'} – R${total / 100}/month`,
+          name: `Skolo Saka contribution – R${total / 100}/month`,
           amount: total,
           interval: 'monthly',
           currency: 'ZAR',
