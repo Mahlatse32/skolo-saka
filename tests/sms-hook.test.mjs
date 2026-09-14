@@ -13,7 +13,7 @@ function request(payload = { user: { phone: '+27821234567' }, sms: { otp: '12345
     'webhook-id': 'test-id', 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
   } });
 }
-test('signed Supabase code is sent as one segment to WinSMS', async () => {
+test('documented WinSMS success response is acknowledged to Supabase', async () => {
   let calls = 0;
   const response = await handleSmsHook(request(), { secret, apiKey: 'test-key', send: async (url, options) => {
     calls++;
@@ -23,7 +23,12 @@ test('signed Supabase code is sent as one segment to WinSMS', async () => {
     assert.equal(body.recipients[0].mobileNumber, '27821234567');
     assert.equal(body.maxSegments, 1);
     assert.match(body.message, /123456/);
-    return Response.json({ recipientResults: [{ accepted: true }] });
+    return Response.json({
+      timeStamp: '20260914224300123',
+      version: '1.0',
+      statusCode: 200,
+      recipients: [{ apiMessageId: 123456, mobileNumber: '27821234567' }],
+    });
   } });
   assert.equal(calls, 1);
   assert.equal(response.status, 200);
@@ -38,8 +43,13 @@ test('tampered, expired and foreign-number requests never call WinSMS', async ()
 test('missing configuration fails closed', async () => {
   assert.equal((await handleSmsHook(request(), {})).status, 503);
 });
-test('recipient rejection, HTTP errors and timeout are not reported as sent', async () => {
-  for (const send of [async()=>Response.json({recipientResults:[{accepted:false}]}), async()=>Response.json({}, {status:401}), async()=>{throw new Error('timeout');}]) {
+test('provider rejection, malformed success, HTTP errors and timeout are not reported as sent', async () => {
+  for (const send of [
+    async()=>Response.json({statusCode:422,errorMessage:'Invalid recipient'}),
+    async()=>Response.json({}),
+    async()=>Response.json({statusCode:401}, {status:401}),
+    async()=>{throw new Error('timeout');},
+  ]) {
     assert.equal((await handleSmsHook(request(), {secret,apiKey:'test',send})).status, 502);
   }
 });
