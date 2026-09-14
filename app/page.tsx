@@ -9,6 +9,7 @@ import {
   Trophy, WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { normalizeSaPhone, pinPassword } from '@/lib/pin-auth';
 import type { Commitment, Membership, Profile, Project, School } from '@/lib/types';
 
 type View = 'home' | 'schools' | 'projects' | 'profile';
@@ -30,18 +31,6 @@ function levelLabel(level: School['level']) {
   return 'School';
 }
 function initials(name:string) { return name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
-function normalizeSaPhone(value:string) {
-  const digits=value.replace(/\D/g,'');
-  if(digits.startsWith('27')) return `+${digits}`;
-  if(digits.startsWith('0')) return `+27${digits.slice(1)}`;
-  return `+27${digits}`;
-}
-async function pinPassword(phone:string,pin:string){
-  const source=new TextEncoder().encode(`skolo-saka-auth-v1:${normalizeSaPhone(phone)}:${pin}:south-africa`);
-  const digest=await crypto.subtle.digest('SHA-256',source);
-  const hex=Array.from(new Uint8Array(digest)).map(x=>x.toString(16).padStart(2,'0')).join('');
-  return `Ss!${hex}`;
-}
 function safeSchoolSearch(value:string){
   return value.trim().replace(/[,()%_*]/g,' ').replace(/\s+/g,' ');
 }
@@ -109,15 +98,25 @@ export default function Page(){
 
   useEffect(()=>{
     let active=true;
-    void supabase.auth.getSession().then(({data})=>{
-      if(!active) return;
-      const sessionUser=data.session?.user??null;
-      setUser(sessionUser);
-      setAuthReady(true);
-      if(sessionUser) void loadApp(sessionUser);
-    }).catch(()=>{
-      if(active) setAuthReady(true);
-    });
+    async function initializeAuth(){
+      try{
+        const params=new URLSearchParams(window.location.search);
+        const code=params.get('code');
+        if(code){
+          const {data,error}=await supabase.auth.exchangeCodeForSession(code);
+          window.history.replaceState({},'',`${window.location.pathname}?view=profile`);
+          if(!active)return;
+          if(error||!data.user){setAuthError('This email confirmation link is invalid or has expired. Request a new one from Profile.');setAuthReady(true);return;}
+          setUser(data.user);setView('profile');setAuthReady(true);await loadApp(data.user);return;
+        }
+        const {data}=await supabase.auth.getSession();
+        if(!active)return;
+        const sessionUser=data.session?.user??null;
+        setUser(sessionUser);setAuthReady(true);
+        if(sessionUser)await loadApp(sessionUser);
+      }catch{if(active){setAuthError('Could not complete authentication. Please try again.');setAuthReady(true);}}
+    }
+    void initializeAuth();
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
       if(!active) return;
       const sessionUser=session?.user??null;
@@ -131,8 +130,10 @@ export default function Page(){
   },[]);
 
   useEffect(()=>{
-    const requested=new URLSearchParams(window.location.search).get('view');
+    const params=new URLSearchParams(window.location.search);
+    const requested=params.get('view');
     if(requested==='home'||requested==='schools'||requested==='projects'||requested==='profile') setView(requested);
+    if(params.get('reset')==='phone')setAuthStep('register');
   },[]);
 
   useEffect(()=>{
@@ -331,7 +332,7 @@ export default function Page(){
 }
 
 function AuthGate({mode,phone,pin,busy,error,setPhone,setPin,onLogin,onRegister,onMode}:{mode:'login'|'register';phone:string;pin:string;busy:boolean;error:string;setPhone:(v:string)=>void;setPin:(v:string)=>void;onLogin:(e?:FormEvent)=>void;onRegister:(e?:FormEvent)=>void;onMode:(m:'login'|'register')=>void}){
-  if(mode==='register') return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={()=>onMode('login')}><ChevronLeft size={17}/> Sign in</button><h1>Create account</h1><p>Enter your phone number. That’s all we need to register.</p><form onSubmit={onRegister}><PhoneField phone={phone} setPhone={setPhone}/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||phone.replace(/\D/g,'').length<9}>{busy?'Sending…':'Continue with SMS'} <ChevronRight size={18}/></button></form></section></main>;
+  if(mode==='register') return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={()=>onMode('login')}><ChevronLeft size={17}/> Sign in</button><h1>Register or reset PIN</h1><p>Enter your phone number. We’ll send an SMS code so you can create an account or securely choose a new PIN.</p><form onSubmit={onRegister}><PhoneField phone={phone} setPhone={setPhone}/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||phone.replace(/\D/g,'').length<9}>{busy?'Sending…':'Continue with SMS'} <ChevronRight size={18}/></button></form></section></main>;
   return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label>4-digit PIN</label><input className="pin-input" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-secondary" onClick={()=>onMode('register')}>Register or reset PIN</button></section></main>;
 }
 function PhoneField({phone,setPhone}:{phone:string;setPhone:(v:string)=>void}){return <><label>Mobile number</label><div className="auth-phone"><span>+27</span><input autoFocus inputMode="numeric" autoComplete="tel" value={phone.replace(/^\+27/,'')} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="82 123 4567"/></div></>}
