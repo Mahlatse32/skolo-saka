@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
       if (planSaveError) throw planSaveError;
     }
 
-    const origin = process.env.NEXT_APP_URL || request.nextUrl.origin;
+    const origin = 'https://www.skolosaka.co.za';
     const payload: Record<string, unknown> = {
       email,
       amount: total,
