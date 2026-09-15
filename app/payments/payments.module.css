@@ -2,6 +2,7 @@
 .consent { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; font-size: 13px; line-height: 1.5; }
 .consent input { margin-top: 4px; flex-shrink: 0; }
 .amountEditor{margin:16px 0;padding:14px;border:1px solid #c9ddd0;border-radius:12px;background:#f7fbf8}.amountEditor label{display:block;font-weight:800;margin-bottom:8px}.amountEditor input{width:150px;padding:10px;border:1px solid #bfcfc4;border-radius:9px;font:inherit}.amountEditor p{font-size:12px;color:#607168;margin:8px 0 0}.secondaryButton{border:1px solid #cbd8cf;background:#fff;color:#294d3a;border-radius:10px;padding:10px 13px;font:inherit;font-weight:700;cursor:pointer}.secondaryButton:disabled{opacity:.5}
+.amountEditor .inlineError{color:#9b342d;font-weight:750;font-size:13px}
 
 /* Keep setup above the fold and avoid repeating the total in a large hero. */
 .compactHero { margin: 0 0 22px; }

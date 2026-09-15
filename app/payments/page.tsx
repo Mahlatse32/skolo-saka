@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import styles from './payments.module.css';
+import { moneyInputToCents } from '@/lib/money-input';
 import { SecondaryMobileNavigation } from '../SecondaryShell';
 
 type SchoolRow = {
@@ -85,6 +86,7 @@ export default function PaymentsPage() {
   const [editingAmount, setEditingAmount] = useState<string | null>(null);
   const [newAmount, setNewAmount] = useState('');
   const [savingAmount, setSavingAmount] = useState<string | null>(null);
+  const [amountError, setAmountError] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -254,15 +256,15 @@ export default function PaymentsPage() {
   }
 
   function beginAmountChange(row: Instruction) {
-    setError(''); setMessage(''); setEditingAmount(row.id); setNewAmount((row.amount_cents / 100).toFixed(2));
+    setError(''); setMessage(''); setAmountError(''); setEditingAmount(row.id); setNewAmount((row.amount_cents / 100).toFixed(2));
   }
 
   async function changeAmount(row: Instruction) {
-    const amountCents = Math.round(Number(newAmount) * 100);
-    if (!Number.isFinite(Number(newAmount)) || !Number.isSafeInteger(amountCents) || amountCents < 1000 || amountCents > 100_000_000) {
-      setError('Enter a monthly amount between R10 and R1,000,000.'); return;
+    const amountCents = moneyInputToCents(newAmount);
+    if (amountCents === null || amountCents < 1000 || amountCents > 100_000_000) {
+      setAmountError('Enter a monthly amount between R10 and R1,000,000.'); return;
     }
-    setSavingAmount(row.id); setError(''); setMessage('');
+    setSavingAmount(row.id); setError(''); setMessage(''); setAmountError('');
     try {
       const response = await authedFetch('/api/payments/change-amount', { method: 'POST', body: JSON.stringify({ instructionId: row.id, amountCents }) });
       const data = await response.json();
@@ -272,7 +274,7 @@ export default function PaymentsPage() {
         ? `Monthly amount changed to ${money(amountCents)}. It will apply on ${new Date(data.nextPaymentAt).toLocaleDateString('en-ZA')}; nothing was charged today.`
         : `Monthly amount changed to ${money(amountCents)} for the next billing cycle; nothing was charged today.`);
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not change the monthly amount.'); }
+    } catch (e) { setAmountError(e instanceof Error ? e.message : 'Could not change the monthly amount.'); }
     finally { setSavingAmount(null); }
   }
 
@@ -341,7 +343,7 @@ export default function PaymentsPage() {
       <section className={styles.activeSection}>
         <h2>Your payment arrangements</h2>
         <div className={styles.paymentGrid}>
-          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next payment: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="number" min="10" max="1000000" step="0.01" value={newAmount} onChange={e => setNewAmount(e.target.value)} disabled={savingAmount === row.id}/><p>Applies on the next billing date. Nothing is charged now.</p><div><button className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => setEditingAmount(null)}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly payment'}</button>}</article>)}
+          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next payment: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="text" inputMode="decimal" value={newAmount} onChange={e => { setNewAmount(e.target.value); setAmountError(''); }} disabled={savingAmount === row.id} aria-describedby={`amount-help-${row.id}${amountError ? ` amount-error-${row.id}` : ''}`}/><p id={`amount-help-${row.id}`}>Applies on the next billing date. Nothing is charged now.</p>{amountError && <p id={`amount-error-${row.id}`} className={styles.inlineError} role="alert">{amountError}</p>}<div><button type="button" className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => void changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button type="button" className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => { setEditingAmount(null); setAmountError(''); }}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly payment'}</button>}</article>)}
 
           {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual payment'}</button></article>)}
 
