@@ -8,3 +8,4 @@ out/
 
 *.tsbuildinfo
 npm-debug.log*
+.vercel
