@@ -24,6 +24,7 @@ type InstructionRow = {
   provider_subscription_code: string | null;
   provider_email_token: string | null;
   provider_reference: string | null;
+  next_payment_at: string | null;
 };
 
 export async function authenticatedUser(request: NextRequest) {
@@ -38,7 +39,7 @@ export async function authenticatedUser(request: NextRequest) {
 export async function fetchInstruction(db: SupabaseClient, instructionId: string): Promise<InstructionRow | null> {
   const { data, error } = await db
     .from('payment_instructions')
-    .select('id,user_id,kind,cadence,term_months,amount_cents,currency,status,provider_plan_code,provider_subscription_code,provider_email_token,provider_reference')
+    .select('id,user_id,kind,cadence,term_months,amount_cents,currency,status,provider_plan_code,provider_subscription_code,provider_email_token,provider_reference,next_payment_at')
     .eq('id', instructionId)
     .maybeSingle();
   if (error) throw error;
