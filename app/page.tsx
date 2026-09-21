@@ -11,6 +11,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { normalizeSaPhone, pinPassword } from '@/lib/pin-auth';
 import type { Commitment, Membership, Profile, Project, School } from '@/lib/types';
+import { trackEvent } from './AnalyticsTracker';
 
 type View = 'home' | 'schools' | 'projects' | 'profile';
 type SchoolLevelFilter = 'all' | 'primary' | 'high' | 'combined';
@@ -146,6 +147,9 @@ export default function Page(){
 
   useEffect(()=>{ setSchoolPage(0); },[province,level]);
 
+  useEffect(()=>{if(user)void trackEvent('app_view_changed',{view},`/?view=${view}`);},[user,view]);
+  useEffect(()=>{if(user&&view==='schools'&&debouncedQuery)void trackEvent('school_search',{query_length:debouncedQuery.length,province_filtered:province!=='All provinces',level});},[user,view,debouncedQuery,province,level]);
+
   useEffect(()=>{
     if(!user||view!=='schools') return;
     let active=true;
@@ -184,6 +188,7 @@ export default function Page(){
     setAuthBusy(false);
     if(error||!data.user){ setAuthError('Couldn’t sign in. Verify by SMS to register or reset your PIN.'); return; }
     setPhone(normalized); setPin(''); setUser(data.user); setView('home');
+    void trackEvent('sign_in_success');
     await loadApp(data.user);
   }
 
@@ -198,6 +203,7 @@ export default function Page(){
       const {error}=await supabase.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:true}});
       if(error){setAuthError(error.status===429?'Please wait a minute before requesting another code.':'We could not send your code. Check your number and try again.');return;}
       setPhone(normalized); setOtp(''); setAuthStep('otp'); setResendAt(Date.now()+60000);
+      void trackEvent('otp_requested');
       setAuthMessage(`An SMS code has been requested for ${normalized}. It may take a moment to arrive.`);
     } catch {setAuthError('Could not connect. Check your connection and try again.');}
     finally {setAuthBusy(false);}
@@ -210,6 +216,7 @@ export default function Page(){
       const {data,error}=await supabase.auth.verifyOtp({phone:normalizeSaPhone(phone),token:otp,type:'sms'});
       if(error||!data.user){setAuthError('That code is invalid or has expired. Check it or request a new code.');return;}
       setOtp(''); setPin(''); setAuthStep('create-pin');
+      void trackEvent('otp_verified');
     } catch {setAuthError('Could not connect. Please try again.');}
     finally {setAuthBusy(false);}
   }
@@ -222,6 +229,7 @@ export default function Page(){
     setAuthBusy(false);
     if(error||!data.user){ setAuthError(error?.message||'Could not save your PIN.'); return; }
     setPin(''); setUser(data.user); setAuthStep('login'); setView('home');
+    void trackEvent('registration_completed');
     await loadApp(data.user);
   }
 
@@ -239,6 +247,7 @@ export default function Page(){
     setProfileSaving(false);
     if(error){ setLoadError(error.message); return; }
     setProfile(data as Profile);
+    void trackEvent('profile_saved',{has_email:Boolean(data.email)});
     window.dispatchEvent(new CustomEvent('skolo:profile-email-saved',{detail:{email:data.email??''}}));
     setProfileSaved(true); setTimeout(()=>setProfileSaved(false),1800);
   }
@@ -261,6 +270,7 @@ export default function Page(){
       ? await supabase.from('commitments').update({status:'pending',cancelled_at:null}).eq('id',existing.id).eq('user_id',user.id)
       : await supabase.from('commitments').insert({user_id:user.id,school_id:school.id,amount_cents:1000,currency:'ZAR',frequency:'monthly',status:'pending'});
     if(result.error){setSavingSchool(null);setLoadError(result.error.message);return;}
+    void trackEvent('school_added');
     await loadPrivate(user.id); setSavingSchool(null); setSelectedSchool(null);
   }
 
@@ -270,6 +280,7 @@ export default function Page(){
     if(mErr){setSavingSchool(null);setLoadError(mErr.message);return;}
     const {error:cErr}=await supabase.from('commitments').update({status:'cancelled',cancelled_at:new Date().toISOString()}).eq('user_id',user.id).eq('school_id',schoolId);
     if(cErr){setSavingSchool(null);setLoadError(cErr.message);return;}
+    void trackEvent('school_removed');
     await loadPrivate(user.id); setSelectedSchool(null); setSavingSchool(null);
   }
 

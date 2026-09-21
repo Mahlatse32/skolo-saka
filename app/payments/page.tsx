@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import styles from './payments.module.css';
 import { SecondaryMobileNavigation } from '../SecondaryShell';
+import { trackEvent } from '../AnalyticsTracker';
 
 type SchoolRow = {
   id: string;
@@ -192,6 +193,7 @@ export default function PaymentsPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not load contributions.');
       setContributions(data.contributions);
+      void trackEvent('contribution_history_viewed');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load contributions.'); }
     finally { setHistoryLoading(false); }
   }
@@ -220,6 +222,7 @@ export default function PaymentsPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not start payment.');
+      void trackEvent('checkout_started',{kind,school_count:linkLater?0:selectedSchools.length,term_months:termMonths||0});
       window.location.assign(data.authorizationUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start payment.');
@@ -235,6 +238,7 @@ export default function PaymentsPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not cancel payment.');
       setMessage(data.status === 'non_renewing' ? 'Cancellation requested. Paystack will not renew this payment.' : 'Payment cancelled.');
+      void trackEvent('payment_cancelled',{status:data.status||'cancelled'});
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel payment.'); }
     finally { setCancelling(null); }
@@ -248,6 +252,7 @@ export default function PaymentsPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not cancel payment.');
       setMessage('Individual payment cancelled. You can now include that school in one combined monthly payment.');
+      void trackEvent('legacy_payment_cancelled');
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel payment.'); }
     finally { setCancelling(null); }
@@ -268,6 +273,7 @@ export default function PaymentsPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not change the monthly amount.');
       setEditingAmount(null);
+      void trackEvent('monthly_amount_changed');
       setMessage(data.nextPaymentAt
         ? `Monthly amount changed to ${money(amountCents)}. It will apply on ${new Date(data.nextPaymentAt).toLocaleDateString('en-ZA')}; nothing was charged today.`
         : `Monthly amount changed to ${money(amountCents)} for the next billing cycle; nothing was charged today.`);
