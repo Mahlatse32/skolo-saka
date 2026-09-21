@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { trackEvent } from '../../AnalyticsTracker';
 
 export default function PaymentCompletePage(){
   const [message,setMessage]=useState('Confirming your contribution…');
   const [done,setDone]=useState(false);
   useEffect(()=>{
+    void trackEvent('payment_complete_view');
     const params=new URLSearchParams(window.location.search);
     const reference=params.get('reference')||params.get('trxref');
     if(!reference){setMessage('Payment return received. You can go back to Skolo Saka.');return;}
