@@ -1,0 +1,140 @@
+name: Budgeted development agent
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing issue number marked agent-ready
+        required: true
+        type: number
+
+concurrency:
+  group: skolo-saka-development-agent
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    if: >-
+      vars.AGENT_ENABLED == 'true' &&
+      (github.event_name != 'issues' ||
+       (github.event.label.name == 'agent-ready' && github.actor == 'Mahlatse32')) &&
+      (github.event_name != 'workflow_dispatch' || github.actor == 'Mahlatse32')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select approved issue and enforce daily run limit
+        id: select
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_ISSUE: ${{ inputs.issue_number }}
+          MAX_RUNS: ${{ vars.AGENT_MAX_RUNS_PER_DAY }}
+        with:
+          script: |
+            const fs = require('fs');
+            const max = Math.min(4, Math.max(1, Number(process.env.MAX_RUNS || 1)));
+            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const {data} = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'agent.yml', per_page: 100,
+              created: `>=${since.toISOString().slice(0, 10)}`
+            });
+            let used = 0;
+            for (const run of data.workflow_runs.filter(r => r.id !== Number(context.runId) &&
+                     new Date(r.created_at) >= since)) {
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
+                ...context.repo, run_id: run.id, per_page: 20
+              });
+              if (jobs.data.jobs.some(j => j.steps?.some(s =>
+                  s.name === 'Run five roles in one Codex invocation' &&
+                  s.conclusion !== 'skipped'))) used++;
+              if (used >= max) break;
+            }
+            if (used >= max) { core.info(`Daily run limit reached: ${used}/${max}`); return; }
+            let issue;
+            if (context.eventName === 'issues') issue = context.payload.issue;
+            else if (context.eventName === 'workflow_dispatch') {
+              const n = Number(process.env.REQUESTED_ISSUE);
+              if (!Number.isSafeInteger(n) || n < 1) throw new Error('Invalid issue number');
+              issue = (await github.rest.issues.get({...context.repo, issue_number: n})).data;
+            } else {
+              const {data} = await github.rest.issues.listForRepo({
+                ...context.repo, state: 'open', labels: 'agent-ready',
+                sort: 'created', direction: 'asc', per_page: 100
+              });
+              issue = data.find(i => !i.pull_request);
+            }
+            if (!issue || issue.state !== 'open' || issue.pull_request ||
+                !issue.labels.some(l => l.name === 'agent-ready')) {
+              core.info('No open approved issue found'); return;
+            }
+            const task = `Issue #${issue.number}\nTitle: ${issue.title}\n\n${issue.body || ''}`;
+            fs.writeFileSync('.agent-task.md', task.slice(0, 30000));
+            core.setOutput('issue', String(issue.number));
+      - name: Install dependencies
+        if: steps.select.outputs.issue != ''
+        run: npm ci
+      - name: Run five roles in one Codex invocation
+        if: steps.select.outputs.issue != ''
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          prompt-file: .github/agent/prompt.md
+          output-file: .agent-output.md
+      - name: Verify resulting code
+        if: steps.select.outputs.issue != ''
+        run: |
+          npm test
+          npm run build
+      - name: Create draft PR for human review
+        if: steps.select.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git add -A
+          git reset -- .agent-task.md .agent-output.md
+          if git diff --cached --quiet; then
+            echo 'No changes to propose.'
+            gh issue edit "$ISSUE_NUMBER" --remove-label agent-ready
+            exit 0
+          fi
+          if git diff --cached --name-only | grep -Eq '^(.github/|AGENTS.md$|\.env|supabase/config.toml$)'; then
+            echo 'Agent modified a protected path; refusing to publish.' >&2
+            exit 1
+          fi
+          branch="agent/issue-${ISSUE_NUMBER}-${RUN_ID}"
+          git switch -c "$branch"
+          git config user.name 'skolo-saka-agent[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -c core.hooksPath=/dev/null commit -m "Propose issue #${ISSUE_NUMBER} for UAT review"
+          gh auth setup-git
+          git -c core.hooksPath=/dev/null push origin "$branch"
+          {
+            echo "Closes neither issue nor production release. Proposed work for #${ISSUE_NUMBER}."
+            echo
+            echo 'Automated checks: `npm test` and `npm run build` passed.'
+            echo
+            echo 'Review the diff, migrations and preview configuration before using UAT.'
+            echo
+            cat .agent-output.md
+          } > /tmp/agent-pr-body.md
+          gh pr create --draft --base main --head "$branch" \
+            --title "Agent proposal for issue #${ISSUE_NUMBER}" \
+            --body-file /tmp/agent-pr-body.md
+          gh issue edit "$ISSUE_NUMBER" --remove-label agent-ready
