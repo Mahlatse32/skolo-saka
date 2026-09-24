@@ -32,7 +32,7 @@ npm run dev
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-The main app can run immediately using its browser-safe pilot Supabase defaults. To use another Supabase project, copy `.env.example` to `.env.local` and replace its values before starting the server.
+The app requires explicit Supabase credentials in every environment. Copy `.env.example` to `.env.local` and replace its values before starting the server. Preview deployments must use a separate UAT Supabase project.
 
 Payment flows additionally require server-only credentials in `.env.local`:
 
@@ -51,4 +51,3 @@ npm run dev
 ```
 
 The browser client uses the Supabase publishable key only. Never expose a service-role key to the frontend.
-
