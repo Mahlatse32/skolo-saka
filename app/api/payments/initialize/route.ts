@@ -1,3 +1,4 @@
+import { applicationOrigin } from '@/lib/deployment';
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase, paystackRequest } from '@/lib/paystack-server';
 import { authenticatedUser, type PaymentKind } from '@/lib/payment-instructions-server';
@@ -25,6 +26,7 @@ function cleanAllocations(value: unknown): AllocationInput[] {
 export async function POST(request: NextRequest) {
   let instructionId: string | null = null;
   try {
+    const origin = applicationOrigin();
     const auth = await authenticatedUser(request);
     if (!auth) return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
 
@@ -175,7 +177,6 @@ export async function POST(request: NextRequest) {
       if (planSaveError) throw planSaveError;
     }
 
-    const origin = 'https://www.skolosaka.co.za';
     const payload: Record<string, unknown> = {
       email,
       amount: total,
