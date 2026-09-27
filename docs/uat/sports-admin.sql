@@ -14,7 +14,7 @@ declare actor uuid:=auth.uid(); super boolean; entity uuid; result jsonb; before
 begin
  if actor is null then raise exception 'Sign in required' using errcode='42501'; end if;
  select exists(select 1 from public.sports_admin_assignments where user_id=actor and active and role='super_admin') into super;
- if not exists(select 1 from public.sports_admin_assignments where user_id=actor and active) then raise exception 'Sports admin access required' using errcode='42501'; end if;
+ if not exists(select 1 from public.sports_admin_assignments where user_id=actor and active and role in ('super_admin','school_admin','coach')) then raise exception 'Sports admin access required' using errcode='42501'; end if;
  if action='team_create' then
   if not sports_private.can_edit(actor,(payload->>'school_id')::uuid,null) then raise exception 'School access required' using errcode='42501'; end if;
   if length(trim(payload->>'name')) not between 2 and 100 or length(trim(payload->>'age_group')) not between 1 and 30 then raise exception 'Enter a team name and age group'; end if;

@@ -1,11 +1,11 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {authenticatedUser} from '@/lib/payment-instructions-server';
 import {adminSupabase} from '@/lib/paystack-server';
-import {canManageTeam,type SportsRole} from '@/lib/sports-access';
+import {canManageTeam,hasSportsAdminRole,type SportsRole} from '@/lib/sports-access';
 const json=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
 export async function GET(req:NextRequest){try{
  const auth=await authenticatedUser(req);if(!auth)return json({error:'Sign in to manage sports.'},401);
- const db=adminSupabase();const {data:roles,error}=await db.from('sports_admin_assignments').select('*').eq('user_id',auth.user.id).eq('active',true);if(error)throw error;if(!roles?.length)return json({error:'Your account has no sports admin assignment.'},403);
+ const db=adminSupabase();const {data:roles,error}=await db.from('sports_admin_assignments').select('*').eq('user_id',auth.user.id).eq('active',true);if(error)throw error;if(!hasSportsAdminRole((roles||[]) as SportsRole[]))return json({error:'Your account has no sports admin assignment.'},403);
  const superAdmin=roles.some(r=>r.role==='super_admin');
  const [schools,teams,matches,players,roster,assignments,users,audit]=await Promise.all([
  db.from('schools').select('id,name').order('name'),db.from('sports_teams').select('*').order('name'),db.from('sports_matches').select('*').order('starts_at',{ascending:false}),
@@ -25,6 +25,9 @@ export async function GET(req:NextRequest){try{
  }catch{return json({error:'Could not load sports administration.'},500);}}
 export async function POST(req:NextRequest){try{
  const auth=await authenticatedUser(req);if(!auth)return json({error:'Sign in required.'},401);
+ const {data:roles,error:roleError}=await auth.supabase.from('sports_admin_assignments').select('*').eq('user_id',auth.user.id).eq('active',true);
+ if(roleError)return json({error:'Could not verify sports access.'},503);
+ if(!hasSportsAdminRole((roles||[]) as SportsRole[]))return json({error:'Your account has no sports admin assignment.'},403);
  const body=await req.json();if(typeof body.action!=='string'||!body.payload||typeof body.payload!=='object')return json({error:'Invalid action.'},400);
  if(['fixture_update','result_submit','result_confirm','event_add'].includes(body.action)&&(!Number.isInteger(body.payload.revision)||body.payload.revision<0))return json({error:'Refresh the match before saving.'},400);
  const {data,error}=await auth.supabase.rpc('sports_admin_mutate',{action:body.action,payload:body.payload});if(error)return json({error:error.message},error.code==='42501'?403:error.code==='40001'?409:400);return json(data);
