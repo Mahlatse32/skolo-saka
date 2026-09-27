@@ -27,6 +27,34 @@ begin
   insert into public.sports_players(school_id,first_name,last_name,position,public_profile,guardian_consent_at) values(team.school_id,trim(payload->>'first_name'),trim(payload->>'last_name'),left(payload->>'position',70),coalesce((payload->>'publish')::boolean,false),case when coalesce((payload->>'publish')::boolean,false) then now() else null end) returning id,to_jsonb(sports_players.*) into entity,result;
   insert into public.sports_team_players(team_id,player_id,shirt_number) values(team.id,entity,nullif(payload->>'shirt_number','')::int);
   entity_type:='player';
+ elsif action in ('roster_assign','roster_remove') then
+  select * into strict team from public.sports_teams where id=(payload->>'team_id')::uuid;
+  select * into strict player from public.sports_players where id=(payload->>'player_id')::uuid;
+  if not sports_private.can_edit(actor,team.school_id,team.id) or player.school_id<>team.school_id then raise exception 'Player and managed team must belong to the same school' using errcode='42501'; end if;
+  if not sports_private.can_edit(actor,player.school_id,null) and not (player.public_profile and player.guardian_consent_at is not null) and not exists(select 1 from public.sports_team_players r where r.player_id=player.id and sports_private.can_edit(actor,player.school_id,r.team_id)) then raise exception 'Player access required' using errcode='42501'; end if;
+  select to_jsonb(r.*) into before_row from public.sports_team_players r where r.team_id=team.id and r.player_id=player.id;
+  if action='roster_assign' then
+   if nullif(payload->>'shirt_number','')::int not between 0 and 999 then raise exception 'Invalid shirt number'; end if;
+   insert into public.sports_team_players(team_id,player_id,shirt_number) values(team.id,player.id,nullif(payload->>'shirt_number','')::int) on conflict(team_id,player_id) do update set shirt_number=excluded.shirt_number returning to_jsonb(sports_team_players.*) into result;
+  else
+   if exists(select 1 from public.sports_matches m where m.status in ('live','pending_confirmation') and team.id in (m.home_team_id,m.away_team_id)) then raise exception 'Finish active results before removing a player'; end if;
+   delete from public.sports_team_players where team_id=team.id and player_id=player.id;
+   result:=jsonb_build_object('team_id',team.id,'player_id',player.id,'removed',true);
+  end if;
+  entity:=player.id;entity_type:='roster';
+ elsif action in ('photo_publish','photo_unpublish') then
+  select * into strict player from public.sports_players where id=(payload->>'player_id')::uuid for update;
+  if not sports_private.can_edit(actor,player.school_id,null) then raise exception 'School manager approval required' using errcode='42501'; end if;
+  before_row:=to_jsonb(player);
+  if action='photo_publish' then
+   if not player.public_profile or player.guardian_consent_at is null or not coalesce((payload->>'permission_confirmed')::boolean,false) then raise exception 'Confirm player/guardian permission for this photo'; end if;
+   if not exists(select 1 from public.profiles where id=player.user_id and avatar_path is not null) then raise exception 'This player has not uploaded a profile photo'; end if;
+   update public.sports_players set photo_path=(select avatar_path from public.profiles where id=player.user_id) where id=player.id and (select avatar_path from public.profiles where id=player.user_id) like player.user_id::text||'/%' returning to_jsonb(sports_players.*) into result;
+   if result is null then raise exception 'Invalid account photo'; end if;
+  else
+   update public.sports_players set photo_path=null where id=player.id returning to_jsonb(sports_players.*) into result;
+  end if;
+  entity:=player.id;entity_type:='player';
  elsif action in ('fixture_create','fixture_update') then
   select * into strict home from public.sports_teams where id=(payload->>'home_team_id')::uuid;
   select * into strict away from public.sports_teams where id=(payload->>'away_team_id')::uuid;
