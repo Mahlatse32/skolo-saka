@@ -263,7 +263,7 @@ export default function Page(){
 
   async function addSchool(school:School,year:number|null,grade:number|null){
     if(!user) return; setSavingSchool(school.id); setLoadError('');
-    const {error:mErr}=await supabase.from('school_memberships').upsert({user_id:user.id,school_id:school.id,role:'alumnus',graduation_year:year,grade_left:grade,verified:false},{onConflict:'user_id,school_id,role'});
+    const {error:mErr}=await supabase.from('school_memberships').upsert({user_id:user.id,school_id:school.id,role:'alumnus',graduation_year:year,grade_left:grade,verified:false},{onConflict:'user_id,school_id'});
     if(mErr){setSavingSchool(null);setLoadError(mErr.message);return;}
     const existing=commitments.find(c=>c.school_id===school.id);
     const result=existing
