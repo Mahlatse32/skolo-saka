@@ -1,0 +1,11 @@
+'use client';
+import {useState,type FormEvent} from 'react';
+import {supabase} from '@/lib/supabase';
+import {pinPassword,normalizeSaPhone} from '@/lib/pin-auth';
+export default function TestRegistration(){
+ const [phone,setPhone]=useState(''),[pin,setPin]=useState(''),[code,setCode]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const enabled=process.env.NEXT_PUBLIC_SUPABASE_URL==='https://faytrobauwibxujvmbct.supabase.co';
+ async function register(e:FormEvent){e.preventDefault();setBusy(true);setError('');try{const normalized=normalizeSaPhone(phone),password=await pinPassword(normalized,pin);const response=await fetch('/api/uat/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:normalized,password,code})});const data=await response.json();if(!response.ok)throw new Error(data.error);const result=await supabase.auth.signInWithPassword({phone:normalized,password});if(result.error)throw new Error('Account created. Return to sign in with your PIN.');window.location.href='/';}catch(e){setError(e instanceof Error?e.message:'Could not register.');}finally{setBusy(false);}}
+ if(!enabled)return <main className="auth-shell"><h1>Not available</h1></main>;
+ return <main className="auth-shell"><section className="auth-card"><a href="/">← Sign in</a><h1>Create a UAT account</h1><p>Test accounts only. No SMS or real charges. Choose a synthetic number between <b>0600000000 and 0600000099</b>. Use test code <b>123456</b>.</p><form onSubmit={register}><label htmlFor="test-phone">Test phone number</label><input id="test-phone" value={phone} onChange={e=>setPhone(e.target.value)} inputMode="numeric" pattern="06000000[0-9]{2}" required/><label htmlFor="test-code">Test code</label><input id="test-code" value={code} onChange={e=>setCode(e.target.value)} inputMode="numeric" pattern="123456" required/><label htmlFor="test-pin">Choose a four-digit PIN</label><input id="test-pin" type="password" autoComplete="new-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} pattern="[0-9]{4}" required/>{error&&<p role="alert">{error}</p>}<button className="primary full" disabled={busy}>{busy?'Creating…':'Create test account'}</button></form><p>Existing accounts keep their current PIN. This page cannot reset an existing account.</p></section></main>;
+}
