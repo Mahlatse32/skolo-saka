@@ -109,13 +109,13 @@ export default function PaymentsPage() {
     try {
       const response = await authedFetch('/api/payments/overview');
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not load payments.');
+      if (!response.ok) throw new Error(data.error || 'Could not load contributions.');
       setOverview(data as Overview);
       setAmounts(Object.fromEntries((data.schools || []).map((school: SchoolRow) => [school.id, Math.max(1000, Number(school.amount_cents || 1000))])));
       const locked = recurringLockedSchoolIds(data as Overview);
       setSelected(new Set((data.schools || []).filter((school: SchoolRow) => !locked.has(school.id)).map((school: SchoolRow) => school.id)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load payments.');
+      setError(e instanceof Error ? e.message : 'Could not load contributions.');
     } finally { setLoading(false); }
   }
 
@@ -245,13 +245,13 @@ export default function PaymentsPage() {
   }
 
   async function cancelLegacy(commitmentId: string) {
-    if (!window.confirm('Cancel this older individual monthly payment?')) return;
+    if (!window.confirm('Cancel this older individual monthly contribution?')) return;
     setCancelling(commitmentId); setError(''); setMessage('');
     try {
       const response = await authedFetch('/api/payments/cancel', { method: 'POST', body: JSON.stringify({ legacyCommitmentId: commitmentId }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not cancel payment.');
-      setMessage('Individual payment cancelled. You can now include that school in one combined monthly payment.');
+      setMessage('Individual contribution cancelled. You can now include that school in one combined monthly contribution.');
       void trackEvent('legacy_payment_cancelled');
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel payment.'); }
@@ -287,23 +287,23 @@ export default function PaymentsPage() {
     <div className={styles.shell}>
       <div className={styles.topbar}><a className={styles.back} href="/">← Back to Skolo Saka</a><div className={styles.brand}>Skolo Saka</div></div>
 
-      <header className={styles.compactHero}><span className={styles.eyebrow}>Payments</span><h1>Support starts here.</h1><p>Donate once or monthly. Choosing a school is optional.</p></header>
+      <header className={styles.compactHero}><span className={styles.eyebrow}>Contributions</span><h1>Support starts here.</h1><p>Donate once or monthly. Choosing a school is optional.</p></header>
       {loading && <p role="status">Loading your saved arrangements…</p>}
-      {overview && overview.paymentMode !== 'live' && <div className={styles.notice} role="status">{overview?.paymentMode === 'test' ? 'Demo checkout: test payments only. No real contribution will be collected.' : 'Secure checkout is temporarily unavailable. Please try again shortly.'}</div>}
+      {overview && overview.paymentMode !== 'live' && <div className={styles.notice} role="status">{overview?.paymentMode === 'test' ? 'Demo checkout: test contributions only. No real contribution will be collected.' : 'Secure checkout is temporarily unavailable. Please try again shortly.'}</div>}
       {error && <div className={styles.error} role="alert">{error}{!overview && !loading && <button onClick={() => void load()}>Try again</button>}</div>}
       {message && <div className={styles.success}>{message}</div>}
-      {!!overview?.legacy.length && <div className={styles.notice}>You still have older individual school subscriptions. Cancel those below before adding the same schools to one combined monthly payment.</div>}
+      {!!overview?.legacy.length && <div className={styles.notice}>You still have older individual school subscriptions. Cancel those below before adding the same schools to one combined monthly contribution.</div>}
 
       <div className={styles.layout}>
         <section className={styles.card} id="payment-setup">
-          <div className={styles.sectionTitle}><div><h2>Set up a payment</h2><p>Start from R10. Confirm your donation securely with Paystack.</p></div></div>
+          <div className={styles.sectionTitle}><div><h2>Set up a contribution</h2><p>Start from R10. Confirm your donation securely with Paystack.</p></div></div>
           <div className={styles.toggle}>
             <button className={kind === 'recurring' ? styles.active : ''} onClick={() => setKind('recurring')}>Monthly</button>
             <button className={kind === 'one_off' ? styles.active : ''} onClick={() => setKind('one_off')}>Once-off</button>
           </div>
 
           {kind === 'recurring' && <div className={styles.termRow}>
-            <div><label htmlFor="term">How long?</label><div className={styles.fineprint}>Continue until cancelled, or choose a fixed number of monthly payments.</div></div>
+            <div><label htmlFor="term">How long?</label><div className={styles.fineprint}>Continue until cancelled, or choose a fixed number of monthly contributions.</div></div>
             <div style={{display:'flex',gap:8,alignItems:'center'}}><select id="term" value={term} onChange={e => setTerm(e.target.value)}><option value="forever">Until cancelled</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="custom">Custom</option></select>{term === 'custom' && <input className={styles.customTerm} type="number" min={1} max={1200} value={customTerm} onChange={e => setCustomTerm(e.target.value)} aria-label="Custom term in months"/>}</div>
           </div>}
 
@@ -324,12 +324,12 @@ export default function PaymentsPage() {
             })}
             {!loading && !overview?.schools.length && <div className={styles.empty}>No linked schools yet. Choose “No school” above to donate immediately.</div>}
           <a className={styles.back} href="/schools">Find and add a school →</a></div>}
-          <div className={styles.termRow}><div><label htmlFor="receipt-email">Email for payment receipts</label><p className={styles.fineprint}>Leave blank to use your saved email.</p></div><input id="receipt-email" type="email" autoComplete="email" value={receiptEmail} onChange={e => setReceiptEmail(e.target.value)} style={{maxWidth:'100%',minWidth:0}}/></div>
+          <div className={styles.termRow}><div><label htmlFor="receipt-email">Email for contribution receipts</label><p className={styles.fineprint}>Leave blank to use your saved email.</p></div><input id="receipt-email" type="email" autoComplete="email" value={receiptEmail} onChange={e => setReceiptEmail(e.target.value)} style={{maxWidth:'100%',minWidth:0}}/></div>
         </section>
 
         <aside className={styles.summary}>
           <div className={styles.summaryBox}>
-            <h3>Payment summary</h3>
+            <h3>Contribution summary</h3>
             <div className={styles.summaryLine}><span>Type</span><strong>{kind === 'recurring' ? 'Monthly' : 'Once-off'}</strong></div>
             <div className={styles.summaryLine}><span>Schools</span><strong>{linkLater ? 'None — optional' : selectedSchools.length}</strong></div>
             {kind === 'recurring' && <div className={styles.summaryLine}><span>Term</span><strong>{resolvedTermMonths() ? `${resolvedTermMonths()} months` : 'Until cancelled'}</strong></div>}
@@ -345,20 +345,20 @@ export default function PaymentsPage() {
       </div>
 
       <section className={styles.activeSection}>
-        <h2>Your payment arrangements</h2>
+        <h2>Your contribution arrangements</h2>
         <div className={styles.paymentGrid}>
-          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next payment: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="number" min="10" max="1000000" step="0.01" value={newAmount} onChange={e => setNewAmount(e.target.value)} disabled={savingAmount === row.id}/><p>Applies on the next billing date. Nothing is charged now.</p><div><button className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => setEditingAmount(null)}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly payment'}</button>}</article>)}
+          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next contribution: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="number" min="10" max="1000000" step="0.01" value={newAmount} onChange={e => setNewAmount(e.target.value)} disabled={savingAmount === row.id}/><p>Applies on the next billing date. Nothing is charged now.</p><div><button className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => setEditingAmount(null)}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly contribution'}</button>}</article>)}
 
-          {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual payment'}</button></article>)}
+          {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual contribution'}</button></article>)}
 
-          {!loading && !currentInstructions.length && !overview?.legacy.length && <div className={styles.empty}>No active payments yet. Set one up above.</div>}
+          {!loading && !currentInstructions.length && !overview?.legacy.length && <div className={styles.empty}>No active contributions yet. Set one up above.</div>}
         </div>
       </section>
 
       <button className={styles.linkButton} onClick={loadHistory} disabled={historyLoading}>{historyLoading ? 'Loading contributions…' : 'View contribution history'}</button>
       {contributions?.length === 0 && <p>No contributions received yet.</p>}
       {!!contributions?.length && <section className={styles.historySection}><h2>Contributions received</h2><p className={styles.fineprint}>Your latest 100 contribution entries, before processing fees. Donations without a school are included. A combined payment appears once per school.</p><div className={styles.historyCard}>{contributions!.map(row=><div className={styles.historyRow} key={row.id}><div><b>{(Array.isArray(row.schools)?row.schools[0]:row.schools)?.name || 'Donation — no school allocation'}</b><small>{new Date(row.occurred_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>Received</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
-      {!!history.length && <section className={styles.historySection}><h2>Past payment arrangements</h2><div className={styles.historyCard}>{history.map(row => <div className={styles.historyRow} key={row.id}><div><b>{row.kind === 'recurring' ? 'Monthly payment' : 'Once-off payment'} · {row.allocations.map(a => a.school?.name).filter(Boolean).join(', ')}</b><small>{new Date(row.created_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>{row.status.replace('_',' ')}</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
+      {!!history.length && <section className={styles.historySection}><h2>Past contribution arrangements</h2><div className={styles.historyCard}>{history.map(row => <div className={styles.historyRow} key={row.id}><div><b>{row.kind === 'recurring' ? 'Monthly contribution' : 'Once-off contribution'} · {row.allocations.map(a => a.school?.name).filter(Boolean).join(', ')}</b><small>{new Date(row.created_at).toLocaleDateString('en-ZA')}</small></div><span className={styles.historyStatus}>{row.status.replace('_',' ')}</span><span className={styles.historyAmount}>{money(row.amount_cents)}</span></div>)}</div></section>}
     </div>
     <SecondaryMobileNavigation active="payments"/>
   </main>;
