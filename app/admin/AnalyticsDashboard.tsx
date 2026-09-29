@@ -36,7 +36,7 @@ export default function AnalyticsDashboard(){
       const body=await response.json();
       if(!response.ok)throw new Error(body.error||'Could not load analytics.');
       setData(body as AnalyticsData);
-    }catch(reason){setError(reason instanceof Error?reason.message:'Could not load analytics.');}
+    }catch(reason){setData(null);setError(reason instanceof Error?reason.message:'Could not load analytics.');}
     finally{setLoading(false);}
   }
   useEffect(()=>{void load();},[days]);

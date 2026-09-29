@@ -89,7 +89,7 @@ export default function SchoolsPage(){
     setSaving(true);setError('');
     const {data:{user}}=await supabase.auth.getUser();
     if(!user){setError('Sign in first.');setSaving(false);return;}
-    const {error}=await supabase.from('school_memberships').upsert({user_id:user.id,school_id:picker.id,role:'alumnus',graduation_year:year?Number(year):null,grade_left:grade?Number(grade):null,verified:false},{onConflict:'user_id,school_id,role'});
+    const {error}=await supabase.from('school_memberships').upsert({user_id:user.id,school_id:picker.id,role:'alumnus',graduation_year:year?Number(year):null,grade_left:grade?Number(grade):null,verified:false},{onConflict:'user_id,school_id'});
     if(error){setError(error.message);setSaving(false);return;}
     await loadMemberships();
     setPicker(null);setYear('');setGrade('');setSaving(false);
