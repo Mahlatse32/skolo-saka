@@ -1,12 +1,11 @@
+import { paymentConfiguration } from './payment-environment';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 export const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 
 export function paystackSecret() {
-  const key = process.env.PAYSTACK_SECRET_KEY;
-  if (!key) throw new Error('PAYSTACK_SECRET_KEY is not configured');
-  return key;
+  return paymentConfiguration().key;
 }
 
 export async function paystackRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

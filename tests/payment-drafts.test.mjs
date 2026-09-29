@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-function route(path, auth, db, provider = () => { throw new Error('Unexpected payment provider call'); }) {
+function route(path, auth, db, provider = () => { throw new Error('Unexpected payment provider call'); }, available = true) {
   const exports = {};
   const code = ts.transpileModule(readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInNewContext(code, { exports, Date, Set, Number, Error, process: { env: { NEXT_APP_URL: 'https://skolo-saka-arnx.vercel.app' } }, require(name) {
+    if (name.includes('payment-environment')) return { paymentConfiguration: () => { if (!available) throw new Error('unavailable'); return { origin: 'https://www.skolosaka.co.za' }; } };
     if (name === 'next/server') return { NextResponse: { json: (body, options) => ({ body, status: options?.status || 200 }) } };
     if (name.includes('payment-instructions-server')) return { authenticatedUser: async () => auth };
     return { adminSupabase: () => db, paystackRequest: provider };
@@ -117,4 +118,9 @@ test('active monthly donation without schools cancels through Paystack',async()=
  assert.equal(result.status,200);assert.equal(result.body.status,'non_renewing');
  assert.equal(calls.length,1);assert.equal(calls[0][0],'sub');
  assert.equal(patches[0].status,'non_renewing');
+});
+
+test('closed checkout returns 503 before any database or provider activity', async () => {
+ const result = await route('app/api/payments/initialize/route.ts', null, null, undefined, false)(request(valid));
+ assert.equal(result.status, 503);
 });
