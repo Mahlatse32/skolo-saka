@@ -10,12 +10,12 @@ function emailToken(data: any) { return String(data?.email_token || data?.subscr
 function nextPaymentDate(data: any) { return data?.next_payment_date || data?.subscription?.next_payment_date || null; }
 
 export async function POST(request: NextRequest) {
+  try {
   const rawBody = await request.text();
   if (!verifyPaystackSignature(rawBody, request.headers.get('x-paystack-signature'))) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  try {
     const event = JSON.parse(rawBody);
     const data = event?.data || {};
     const metadata = data?.metadata || {};

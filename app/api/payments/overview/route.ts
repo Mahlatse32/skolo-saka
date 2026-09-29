@@ -1,3 +1,4 @@
+import { paymentMode } from '@/lib/payment-environment';
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/paystack-server';
 import { authenticatedUser } from '@/lib/payment-instructions-server';
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ schools, instructions: safeInstructions, legacy, paymentMode: process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_live_') ? 'live' : process.env.PAYSTACK_SECRET_KEY?.startsWith('sk_test_') ? 'test' : 'unavailable' });
+    return NextResponse.json({ schools, instructions: safeInstructions, legacy, paymentMode: paymentMode() });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not load payments.' }, { status: 500 });
   }

@@ -1,44 +1,43 @@
-# Paystack setup for Skolo Saka
+# Skolo Saka payment activation
 
-Start in **Paystack Test Mode**. Never put the secret key in GitHub or browser code.
+Production: https://www.skolosaka.co.za
+UAT: https://skolo-saka-uat.vercel.app
 
-## Vercel environment variables
+## Production configuration
 
-Add these to the `skolo-saka-arnx` project in Vercel → Settings → Environment Variables:
+In Vercel project `skolo-saka-arnx`, Production environment only:
 
-- `PAYSTACK_SECRET_KEY` = your Paystack **Test Secret Key** (`sk_test_...` while testing)
-- `SUPABASE_SERVICE_ROLE_KEY` = the Supabase service-role secret (server only)
-- `NEXT_APP_URL` = `https://skolo-saka-arnx.vercel.app`
+- `NEXT_PUBLIC_SUPABASE_URL=https://nnexzxszqjedaqqukfiq.supabase.co`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: production publishable key
+- `SUPABASE_SERVICE_ROLE_KEY`: production server-only service role key
+- `NEXT_APP_URL=https://www.skolosaka.co.za`
+- `PAYSTACK_SECRET_KEY`: live secret (`sk_live_...`), only after merchant activation
 
-`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` should remain configured as before.
+Never put secret keys in GitHub, chat, or NEXT_PUBLIC variables. Redeploy after changing environment variables. Until the live key is configured, production checkout returns 503 before creating payment records. Registration, school linking and saving unpaid arrangements remain available. Production test keys are rejected for checkout and payment recording. Preview deployments cannot use production payment credentials.
 
-After adding/changing environment variables, redeploy the production deployment.
+In Paystack's **Live** settings:
 
-## Paystack dashboard
+- Webhook: `https://www.skolosaka.co.za/api/paystack/webhook`
+- Callback: `https://www.skolosaka.co.za/payment/complete`
 
-In Paystack → Settings → API Keys & Webhooks → Test Mode, set:
+Use the www webhook directly to avoid redirects. The callback verifies the transaction with Paystack; webhooks validate HMAC SHA512 signatures before processing. Contribution entries use stable references to avoid duplicate receipts. Card contributions are supported; bank-account debit orders are not offered.
 
-- Webhook URL: `https://skolo-saka-arnx.vercel.app/api/paystack/webhook`
-- Callback URL can be `https://skolo-saka-arnx.vercel.app/payment/complete` (the app also sends this callback per transaction).
+## UAT configuration
 
-Use the Test Secret Key only until the complete recurring flow has been tested.
+Keep the test database `faytrobauwibxujvmbct`, its own service role key, a `sk_test_...` Paystack key, and `NEXT_APP_URL=https://skolo-saka-uat.vercel.app`. Live keys are rejected with the test database. UAT sample accounts, sports teams and OTP shortcuts must not be copied into production.
 
-## Test flow
+## Activation verification
 
-1. Sign into Skolo Saka.
-2. Add an email address under Profile (Paystack requires an email for transaction initialization).
-3. Add a school and choose the monthly amount.
-4. Open `/payments` and select **Set up monthly payment**.
-5. Complete Paystack's test checkout.
-6. Paystack redirects to `/payment/complete`; the server independently verifies the transaction.
-7. The signed webhook activates the commitment and writes the contribution to the ledger idempotently.
+1. Confirm merchant approval and payout bank details in Paystack.
+2. Set the live key and canonical app URL securely, then redeploy.
+3. With the owner's approval for the charge, make a R10 once-off contribution and confirm its Paystack reference, signed webhook delivery and one ledger receipt.
+4. Verify monthly setup, cancellation and amount changes separately; these create real financial commitments and must be intentional.
+5. Confirm bank settlement separately. Checkout success does not prove settlement.
+6. Verify real phone OTP, email verification and account recovery on the production domain.
+7. Check declined/abandoned checkout and monitor webhook failures, failed invoices, expiring cards and refunds. Automatic recovery/refund reconciliation is not fully implemented.
 
-The app never stores card numbers, CVVs, or Paystack secret keys in Supabase/browser state.
+## Existing records requiring reconciliation
 
-## Public launch
+A read-only production audit on 2026-09-29 found 12 Paystack contribution entries totalling R780. The stored metadata does not identify test versus live mode. These records have been preserved. Match their transaction references against Paystack before claiming they are real donations or archiving confirmed test records. Do not erase user accounts or ledger history as a launch cleanup.
 
-Use the same canonical public origin for `NEXT_APP_URL`, callback and webhook URLs (for example `https://www.skolosaka.co.za`). Configure the live webhook separately from the test webhook. Complete merchant approval and payout-account verification before switching to a live secret key. Never change to live credentials merely to hide the demo banner.
-
-Payments now disclose card collection, charge-now terms, cancellation, and processing-fee deductions. Checkout requires explicit consent; its version and timestamp are sent in transaction metadata. Both checkout types currently use cards. Bank-account debit orders are not offered. School allocations represent gross contributions, not net bank settlements. The payment page labels gross allocations explicitly.
-
-Before promotion, verify real SMS; one-off and monthly checkout; signed callback/webhook recording without duplicates; declined/abandoned payments; cancellation at Paystack; and actual bank settlement. A successful build or test payment does not prove live settlement. Check webhook delivery for subscription failures and card-expiry scenarios; full automatic payment-recovery handling is not yet implemented.
+Database audit: every current public table has RLS enabled; users can read only their own ledger rows; the analytics summary function is not executable by anon/authenticated roles and is reached through an administrator-checked server route. One platform admin assignment exists.

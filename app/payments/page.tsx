@@ -200,6 +200,7 @@ export default function PaymentsPage() {
 
   async function startPayment() {
     setError(''); setMessage('');
+    if (!overview || overview.paymentMode === 'unavailable') { setError('Online payments are not open yet. You can save your arrangement for later.'); return; }
     if (!consent) { setError('Confirm the payment terms before continuing.'); return; }
     if (!Number.isSafeInteger(total) || total < 1000 || total > 100_000_000) { setError('Enter a contribution between R10 and R1,000,000.'); return; }
     const termMonths = resolvedTermMonths();
@@ -289,7 +290,7 @@ export default function PaymentsPage() {
 
       <header className={styles.compactHero}><span className={styles.eyebrow}>Payments</span><h1>Support starts here.</h1><p>Donate once or monthly. Choosing a school is optional.</p></header>
       {loading && <p role="status">Loading your saved arrangements…</p>}
-      {overview && overview.paymentMode !== 'live' && <div className={styles.notice} role="status">{overview?.paymentMode === 'test' ? 'Demo checkout: test payments only. No real contribution will be collected.' : 'Secure checkout is temporarily unavailable. Please try again shortly.'}</div>}
+      {overview && overview.paymentMode !== 'live' && <div className={styles.notice} role="status">{overview?.paymentMode === 'test' ? 'Demo checkout: test payments only. No real contribution will be collected.' : 'Online payments are not open yet. You can create your account, link your schools and save your contribution arrangement. No money will be charged.'}</div>}
       {error && <div className={styles.error} role="alert">{error}{!overview && !loading && <button onClick={() => void load()}>Try again</button>}</div>}
       {message && <div className={styles.success}>{message}</div>}
       {!!overview?.legacy.length && <div className={styles.notice}>You still have older individual school subscriptions. Cancel those below before adding the same schools to one combined monthly payment.</div>}
@@ -338,7 +339,7 @@ export default function PaymentsPage() {
               <p className={styles.summaryHint}>{kind === 'recurring' ? 'Your card is charged at checkout, then monthly.' : 'Your card is charged once at checkout.'} {linkLater ? 'Your donation is recorded without a school allocation.' : 'Contributions are allocated to your selected schools.'}</p>
               <p className={styles.summaryHint}>Card details are entered securely with Paystack. Processing fees are deducted from contributions.</p>
               <label className={styles.consent}><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)}/><span>{kind === 'recurring' ? `I authorise ${money(total)} now and monthly ${resolvedTermMonths() ? `for ${resolvedTermMonths()} payments in total` : 'until I cancel'}.` : `I confirm a once-off contribution of ${money(total)}.`}</span></label>
-              <button className={styles.primary} onClick={startPayment} disabled={busy || !consent || !Number.isSafeInteger(total) || total < 1000 || total > 100_000_000 || overview?.paymentMode === 'unavailable'}>{busy ? 'Opening secure checkout…' : 'Continue to secure checkout'}</button>
+              <button className={styles.primary} onClick={startPayment} disabled={busy || !consent || !Number.isSafeInteger(total) || total < 1000 || total > 100_000_000 || !overview || overview.paymentMode === 'unavailable'}>{busy ? 'Opening secure checkout…' : 'Continue to secure checkout'}</button>
             </>
           </div>
         </aside>
