@@ -12,3 +12,15 @@
     font-size: 16px;
   }
 }
+
+/* Signed-out pages only need one row for Sign in and About. */
+@media (max-width: 900px) {
+  .mobile-nav:has(> :last-child:nth-child(2)) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    height: 64px;
+  }
+  .mobile-nav:has(> :last-child:nth-child(2)) > :is(a, button) {
+    grid-column: auto;
+  }
+}
