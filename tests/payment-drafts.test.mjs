@@ -106,6 +106,7 @@ test('active monthly donation without schools cancels through Paystack',async()=
  const db={from(table){assert.equal(table,'payment_instructions');const q={update(row){patches.push(row);return q;},eq(){return q;},then(resolve){return Promise.resolve({error:null}).then(resolve);}};return q;}};
  vm.runInNewContext(code,{exports,Date,Error,require(name){
    if(name==='next/server')return{NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
+   if(name.includes('password-server'))return{confirmAccountPassword:async()=>true};
    if(name.includes('payment-instructions-server'))return{
     authenticatedUser:async()=>({user:{id:'owner'}}),
     fetchInstruction:async()=>({id:'i',user_id:'owner',kind:'recurring',status:'active',provider_subscription_code:'sub',provider_email_token:'token'}),

@@ -6,5 +6,5 @@ test('multi-school manager is restricted to assigned schools; coaches to assigne
  assert.equal(canManageTeam([r('coach','a','t')],{id:'other',school_id:'a'}),false);assert.equal(canManageTeam([r('coach','a','t')],{id:'t',school_id:'a'}),true);assert.equal(canManageTeam([r('super_admin',null,null,false)],{id:'t',school_id:'a'}),false);
 });
 test('UAT registration admits only bounded synthetic identities and fixed test code',()=>{
- const b={phone:'+27600000001',password:'Ss!'+('a'.repeat(64)),code:'123456'};assert.equal(validUatRegistration(b),true);assert.equal(validUatRegistration({...b,phone:'+27614590028'}),false);assert.equal(validUatRegistration({...b,code:'000000'}),false);assert.equal(validUatRegistration({...b,password:'1234'}),false);assert.equal(validUatRegistration({...b,phone:'+27600000100'}),false);
+ const b={phone:'+27600000001',password:'river school garden 42!',code:'123456'};assert.equal(validUatRegistration(b),true);assert.equal(validUatRegistration({...b,phone:'+27614590028'}),false);assert.equal(validUatRegistration({...b,code:'000000'}),false);assert.equal(validUatRegistration({...b,password:'1234'}),false);assert.equal(validUatRegistration({...b,phone:'+27600000100'}),false);
 });

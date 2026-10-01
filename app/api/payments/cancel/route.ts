@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/paystack-server';
 import { authenticatedUser, disablePaystackSubscription, fetchInstruction, fetchPaystackSubscription, instructionAllocations } from '@/lib/payment-instructions-server';
+import { confirmAccountPassword } from '@/lib/password-server';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +10,7 @@ export async function POST(request: NextRequest) {
     const auth = await authenticatedUser(request);
     if (!auth) return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
     const body = await request.json();
+    if (!await confirmAccountPassword(auth.user, body.password)) return NextResponse.json({ error: 'Confirm your password before cancelling this contribution.' }, { status: 403 });
     const instructionId = body.instructionId ? String(body.instructionId) : '';
     const legacyCommitmentId = body.legacyCommitmentId ? String(body.legacyCommitmentId) : '';
     if (!instructionId && !legacyCommitmentId) return NextResponse.json({ error: 'Payment instruction is required.' }, { status: 400 });

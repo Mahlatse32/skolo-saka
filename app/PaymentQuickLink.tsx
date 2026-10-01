@@ -5,12 +5,13 @@ import { createPortal } from 'react-dom';
 import { MailCheck } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { hasPasswordCredential } from '@/lib/password-auth';
 
 type SchoolRef={id:string;name:string}; type MembershipRow={schools:SchoolRef|SchoolRef[]|null};
 
 export default function PaymentQuickLink(){
   const [user,setUser]=useState<User|null>(null); const [profileTarget,setProfileTarget]=useState<Element|null>(null); const [authTarget,setAuthTarget]=useState<Element|null>(null); const [schoolMap,setSchoolMap]=useState<Map<string,string>>(new Map()); const [profileEmail,setProfileEmail]=useState(''); const [securityMessage,setSecurityMessage]=useState(''); const [securityError,setSecurityError]=useState(''); const [securityBusy,setSecurityBusy]=useState(false);
-  const visible=Boolean(user);
+  const visible=hasPasswordCredential(user);
 
   useEffect(()=>{
     let active=true;
@@ -48,7 +49,7 @@ export default function PaymentQuickLink(){
   }
 
   const emailVerified=Boolean(user?.email_confirmed_at&&user.email&&user.email.toLowerCase()===profileEmail.trim().toLowerCase());
-  const securityCard=visible?<article className="settings-card"><div className="settings-icon"><MailCheck/></div><h3>Account recovery</h3><p className="security-status">{emailVerified?`${user?.email} is verified and can be used to recover your account.`:profileEmail?`${profileEmail} is not yet verified for account recovery.`:'Add an email address so you can recover your account if you lose access to your phone or PIN.'}</p>{emailVerified?<span className="status-pill">✓ Email verified</span>:<button className="outline security-action" disabled={securityBusy} onClick={verifyEmail}>{securityBusy?'Sending…':'Verify recovery email'}</button>}{securityMessage&&<div className="security-success">{securityMessage}</div>}{securityError&&<div className="security-error">{securityError}</div>}</article>:null;
+  const securityCard=visible?<article className="settings-card"><div className="settings-icon"><MailCheck/></div><h3>Account recovery</h3><p className="security-status">{emailVerified?`${user?.email} is verified and can be used to recover your account.`:profileEmail?`${profileEmail} is not yet verified for account recovery.`:'Add an email address so you can recover your account if you lose access to your phone or password.'}</p>{emailVerified?<span className="status-pill">✓ Email verified</span>:<button className="outline security-action" disabled={securityBusy} onClick={verifyEmail}>{securityBusy?'Sending…':'Verify recovery email'}</button>}{securityMessage&&<div className="security-success">{securityMessage}</div>}{securityError&&<div className="security-error">{securityError}</div>}</article>:null;
   const recoveryLink=!visible&&authTarget?<button className="account-recovery-link" onClick={()=>{window.location.href='/auth/recover';}}>Recover account with email</button>:null;
 
   return <>{visible&&profileTarget?createPortal(securityCard,profileTarget):null}{authTarget&&recoveryLink?createPortal(recoveryLink,authTarget):null}</>;
