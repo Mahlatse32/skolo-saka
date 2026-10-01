@@ -9,14 +9,17 @@ import {
   Trophy, WalletCards, X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { normalizeSaPhone, pinPassword } from '@/lib/pin-auth';
+import { normalizeSaPhone } from '@/lib/pin-auth';
 import ProfilePhoto from './components/ProfilePhoto';
+import PasswordSetup from './components/PasswordSetup';
+import { hasPasswordCredential } from '@/lib/password-auth';
+import { saveAccountPassword } from '@/lib/password-client';
 import type { Commitment, Membership, Profile, Project, School } from '@/lib/types';
 import { trackEvent } from './AnalyticsTracker';
 
 type View = 'home' | 'schools' | 'projects' | 'profile';
 type SchoolLevelFilter = 'all' | 'primary' | 'high' | 'combined';
-type AuthStep = 'login' | 'register' | 'otp' | 'create-pin';
+type AuthStep = 'login' | 'register' | 'otp' | 'create-password';
 type UserMembership = Membership & { schools?: School };
 type ProjectWithSchool = Project & { schools?: School | null };
 type ProfileDraft = { first_name: string; last_name: string; email: string };
@@ -66,7 +69,7 @@ export default function Page(){
   const [authReady,setAuthReady]=useState(false);
   const [authStep,setAuthStep]=useState<AuthStep>('login');
   const [phone,setPhone]=useState('');
-  const [pin,setPin]=useState('');
+  const [password,setPassword]=useState('');
   const [otp,setOtp]=useState('');
   const [resendAt,setResendAt]=useState(0);
   const [resendSeconds,setResendSeconds]=useState(0);
@@ -114,7 +117,7 @@ export default function Page(){
         const {data}=await supabase.auth.getSession();
         if(!active)return;
         const sessionUser=data.session?.user??null;
-        setUser(sessionUser);setAuthReady(true);
+        setUser(sessionUser);if(sessionUser?.phone)setPhone(sessionUser.phone);setAuthReady(true);
         if(sessionUser)await loadApp(sessionUser);
       }catch{if(active){setAuthError('Could not complete authentication. Please try again.');setAuthReady(true);}}
     }
@@ -164,6 +167,7 @@ export default function Page(){
   },[user,view,debouncedQuery,province,level,schoolPage]);
 
   async function loadApp(activeUser:User){
+    if(!hasPasswordCredential(activeUser))return;
     setLoading(true); setLoadError('');
     try{
       const [projectRows,{data:m,error:mErr},{data:c,error:cErr},{data:p,error:pErr}]=await Promise.all([
@@ -181,14 +185,13 @@ export default function Page(){
   }
 
   async function signIn(e?:FormEvent){
-    e?.preventDefault(); if(pin.length!==4) return;
+    e?.preventDefault(); if(!password) return;
     setAuthBusy(true); setAuthError(''); setAuthMessage('');
     const normalized=normalizeSaPhone(phone);
-    const password=await pinPassword(normalized,pin);
     const {data,error}=await supabase.auth.signInWithPassword({phone:normalized,password});
     setAuthBusy(false);
-    if(error||!data.user){ setAuthError('Couldn’t sign in. Verify by SMS to register or reset your PIN.'); return; }
-    setPhone(normalized); setPin(''); setUser(data.user); setView('home');
+    if(error||!data.user){ setAuthError('Couldn’t sign in. Check your phone number and password, or reset your password.'); return; }
+    setPhone(normalized); setPassword(''); setUser(data.user); setView('home');
     void trackEvent('sign_in_success');
     await loadApp(data.user);
   }
@@ -214,29 +217,32 @@ export default function Page(){
     if(authBusy || !/^\d{6}$/.test(otp)) return;
     setAuthBusy(true); setAuthError('');
     try {
-      const {data,error}=await supabase.auth.verifyOtp({phone:normalizeSaPhone(phone),token:otp,type:'sms'});
-      if(error||!data.user){setAuthError('That code is invalid or has expired. Check it or request a new code.');return;}
-      setOtp(''); setPin(''); setAuthStep('create-pin');
+      const response=await fetch('/api/auth/phone-verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:normalizeSaPhone(phone),code:otp})});
+      const result=await response.json();
+      if(!response.ok||!result.session){setAuthError(result.error||'That code is invalid or has expired. Request a new SMS code.');return;}
+      const {error}=await supabase.auth.setSession(result.session);
+      if(error){setAuthError('Could not open your verified session. Request a new SMS code.');return;}
+      setOtp(''); setPassword(''); setAuthStep('create-password');
       void trackEvent('otp_verified');
     } catch {setAuthError('Could not connect. Please try again.');}
     finally {setAuthBusy(false);}
   }
 
-  async function createPin(){
-    if(pin.length!==4) return;
-    setAuthBusy(true); setAuthError('');
-    const password=await pinPassword(phone,pin);
-    const {data,error}=await supabase.auth.updateUser({password});
-    setAuthBusy(false);
-    if(error||!data.user){ setAuthError(error?.message||'Could not save your PIN.'); return; }
-    setPin(''); setUser(data.user); setAuthStep('login'); setView('home');
-    void trackEvent('registration_completed');
-    await loadApp(data.user);
+  async function createPassword(newPassword:string){
+    if(authBusy)return;
+    setAuthBusy(true);setAuthError('');
+    try{
+      const updated=await saveAccountPassword(newPassword);
+      setPassword('');setUser(updated);setAuthStep('login');setView('home');
+      void trackEvent('registration_completed');
+      await loadApp(updated);
+    }catch(error){setAuthError(error instanceof Error?error.message:'Could not save your password.');}
+    finally{setAuthBusy(false);}
   }
 
   async function signOut(){
     await supabase.auth.signOut();
-    setUser(null); setView('home'); setPhone(''); setPin(''); setOtp(''); setAuthError(''); setAuthMessage(''); setAuthStep('login');
+    setUser(null); setView('home'); setPhone(''); setPassword(''); setOtp(''); setAuthError(''); setAuthMessage(''); setAuthStep('login');
     setDirectorySchools([]); setSchoolCount(0); setProjects([]); setMemberships([]); setCommitments([]); setProfile(null);
   }
 
@@ -315,8 +321,8 @@ export default function Page(){
 
   if(!authReady) return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Opening Skolo Saka…</h1></section></main>;
   if(authStep==='otp') return <OtpGate resendSeconds={resendSeconds} onResend={()=>void sendOtp()} phone={phone} otp={otp} busy={authBusy} error={authError} message={authMessage} setOtp={setOtp} onVerify={verifyOtp} onBack={()=>{setAuthStep('register');setAuthError('');}}/>;
-  if(authStep==='create-pin') return <PinCreate pin={pin} busy={authBusy} error={authError} setPin={setPin} onSave={createPin}/>;
-  if(!user) return <AuthGate mode={authStep} phone={phone} pin={pin} busy={authBusy} error={authError} setPhone={setPhone} setPin={setPin} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{setAuthStep(mode);setAuthError('');setPin('');}}/>;
+  if(authStep==='create-password') return <PasswordSetup busy={authBusy} error={authError} onSave={createPassword}/>;
+  if(!user||authStep==='register'||!hasPasswordCredential(user)) return <AuthGate mode={user&&!hasPasswordCredential(user)?'register':authStep} phone={phone} password={password} busy={authBusy} error={authError} setPhone={setPhone} setPassword={setPassword} onLogin={signIn} onRegister={sendOtp} onMode={mode=>{if(user&&!hasPasswordCredential(user)&&mode==='login'){void signOut();return;}setAuthStep(mode);setAuthError('');setPassword('');}}/>;
 
   return <main className="app-shell">
     <aside className="app-sidebar">
@@ -335,7 +341,7 @@ export default function Page(){
 
       {view==='projects'&&<div className="page-content"><section className="page-heading"><div><span className="eyebrow">Projects</span><h1>School projects.</h1></div></section>{myProjects.length>0&&<><SectionHeader title="My schools"/><ProjectGrid projects={myProjects}/></>}<SectionHeader title="All projects"/><ProjectGrid projects={projects}/></div>}
 
-      {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Add an email address before making a contribution.</p></div></section><ProfilePhoto/><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><Info/></div><h3>About Skolo Saka</h3><p>Learn how schools, former learners and partners can support school sport.</p><a className="outline" href="/about">Read about us</a></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and PIN.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
+      {view==='profile'&&<div className="page-content profile-page"><section className="page-heading"><div><span className="eyebrow">Profile</span><h1>Your details.</h1><p>Your phone number is your account. Add an email address before making a contribution.</p></div></section><ProfilePhoto/><div className="profile-grid"><form className="settings-card profile-form" onSubmit={saveProfile}><div className="settings-icon"><CircleUserRound/></div><h3>Personal details</h3><div className="form-grid"><label className="field">Name<input value={profileDraft.first_name} onChange={e=>setProfileDraft(v=>({...v,first_name:e.target.value}))} placeholder="Name"/></label><label className="field">Surname<input value={profileDraft.last_name} onChange={e=>setProfileDraft(v=>({...v,last_name:e.target.value}))} placeholder="Surname"/></label><label className="field field-full">Email<input type="email" value={profileDraft.email} onChange={e=>setProfileDraft(v=>({...v,email:e.target.value}))} placeholder="name@example.com"/></label></div><button className="primary" disabled={profileSaving}>{profileSaving?'Saving…':profileSaved?'Saved':'Save profile'}</button></form><article className="settings-card"><div className="settings-icon"><Phone/></div><h3>Phone</h3><p>{user.phone}</p><span className="status-pill"><Check size={13}/> Verified</span></article><article className="settings-card"><div className="settings-icon"><Info/></div><h3>About Skolo Saka</h3><p>Learn how schools, former learners and partners can support school sport.</p><a className="outline" href="/about">Read about us</a></article><article className="settings-card"><div className="settings-icon"><Info/></div><h3>Password</h3><p>Protect your account with a password you use only for Skolo Saka.</p><a className="outline" href="/?reset=phone">Change password</a></article><article className="settings-card"><div className="settings-icon"><LogOut/></div><h3>Sign out</h3><p>You’ll sign in again with your phone number and password.</p><button className="danger-outline" onClick={signOut}>Sign out</button></article></div></div>}
     </section>
 
     <nav className="mobile-nav" style={{gridTemplateColumns:'repeat(7,1fr)'}}><NavButton active={view==='home'} icon={<Home/>} label="Home" onClick={()=>setView('home')}/><NavLink href="/payments" icon={<WalletCards/>} label="Contributions"/><NavLink href="/schools" icon={<Building2/>} label="Schools" badge={memberships.length||undefined}/><NavButton active={view==='projects'} icon={<Trophy/>} label="Projects" onClick={()=>setView('projects')}/><NavButton active={view==='profile'} icon={<CircleUserRound/>} label="Profile" onClick={()=>setView('profile')}/><NavLink href="/sports" icon={<Trophy/>} label="Sports"/><NavLink href="/about" icon={<Info/>} label="About"/></nav>
@@ -343,14 +349,14 @@ export default function Page(){
   </main>;
 }
 
-function AuthGate({mode,phone,pin,busy,error,setPhone,setPin,onLogin,onRegister,onMode}:{mode:'login'|'register';phone:string;pin:string;busy:boolean;error:string;setPhone:(v:string)=>void;setPin:(v:string)=>void;onLogin:(e?:FormEvent)=>void;onRegister:(e?:FormEvent)=>void;onMode:(m:'login'|'register')=>void}){
-  if(mode==='register') return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={()=>onMode('login')}><ChevronLeft size={17}/> Sign in</button><h1>Register or reset PIN</h1>{process.env.NEXT_PUBLIC_SUPABASE_URL==='https://faytrobauwibxujvmbct.supabase.co'&&<a className="account-recovery-link" href="/uat/register">Create a synthetic UAT account · code 123456 · no SMS</a>}<p>Enter your phone number. We’ll send an SMS code so you can create an account or securely choose a new PIN.</p><form onSubmit={onRegister}><PhoneField phone={phone} setPhone={setPhone}/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||phone.replace(/\D/g,'').length<9}>{busy?'Sending…':'Continue with SMS'} <ChevronRight size={18}/></button></form></section></main>;
-  return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label>4-digit PIN</label><input className="pin-input" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-secondary" onClick={()=>onMode('register')}>Register or reset PIN</button>{process.env.NEXT_PUBLIC_SUPABASE_URL==='https://faytrobauwibxujvmbct.supabase.co'&&<a className="account-recovery-link" href="/uat/register">Create UAT account · no SMS</a>}<a className="account-recovery-link" href="/about">About Skolo Saka</a></section></main>;
+function AuthGate({mode,phone,password,busy,error,setPhone,setPassword,onLogin,onRegister,onMode}:{mode:'login'|'register';phone:string;password:string;busy:boolean;error:string;setPhone:(v:string)=>void;setPassword:(v:string)=>void;onLogin:(e?:FormEvent)=>void;onRegister:(e?:FormEvent)=>void;onMode:(m:'login'|'register')=>void}){
+  if(mode==='register') return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" onClick={()=>onMode('login')}><ChevronLeft size={17}/> Sign in</button><h1>Set your password</h1>{process.env.NEXT_PUBLIC_SUPABASE_URL==='https://faytrobauwibxujvmbct.supabase.co'&&<a className="account-recovery-link" href="/uat/register">Create a synthetic UAT account · no SMS</a>}<p>Verify your phone by SMS to register, set your first password or reset it.</p><form onSubmit={onRegister}><PhoneField phone={phone} setPhone={setPhone}/>{error&&<div role="alert" className="message error">{error}</div>}<button className="primary full" disabled={busy||phone.replace(/\D/g,'').length<9}>{busy?'Sending…':'Continue with SMS'} <ChevronRight size={18}/></button></form><a className="auth-secondary" href="/auth/recover">Use verified recovery email</a></section></main>;
+  return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Sign in</h1><form onSubmit={onLogin}><PhoneField phone={phone} setPhone={setPhone}/><label htmlFor="login-password">Password</label><input id="login-password" className="password-input" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/>{error&&<div role="alert" className="message error">{error}</div>}<button className="primary full" disabled={busy||!password||phone.replace(/\D/g,'').length<9}>{busy?'Signing in…':'Sign in'} <ChevronRight size={18}/></button></form><button className="auth-secondary" onClick={()=>onMode('register')}>Register or reset password</button>{process.env.NEXT_PUBLIC_SUPABASE_URL==='https://faytrobauwibxujvmbct.supabase.co'&&<a className="account-recovery-link" href="/uat/register">Create UAT account · no SMS</a>}<a className="account-recovery-link" href="/about">About Skolo Saka</a></section></main>;
 }
-function PhoneField({phone,setPhone}:{phone:string;setPhone:(v:string)=>void}){return <><label>Mobile number</label><div className="auth-phone"><span>+27</span><input autoFocus inputMode="numeric" autoComplete="tel" value={phone.replace(/^\+27/,'')} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="82 123 4567"/></div></>}
+function PhoneField({phone,setPhone}:{phone:string;setPhone:(v:string)=>void}){return <><label htmlFor="mobile-number">Mobile number</label><div className="auth-phone"><span>+27</span><input id="mobile-number" type="tel" inputMode="tel" autoComplete="tel" value={phone.replace(/^\+27/,'')} onChange={e=>setPhone(e.target.value.replace(/\D/g,'').slice(0,10))} placeholder="82 123 4567"/></div></>}
 function OtpGate({phone,otp,busy,error,message,setOtp,onVerify,onBack,onResend,resendSeconds}:{phone:string;otp:string;busy:boolean;error:string;message:string;setOtp:(v:string)=>void;onVerify:()=>void;onBack:()=>void;onResend:()=>void;resendSeconds:number}){return <main className="auth-shell"><section className="auth-card"><Brand/><button className="auth-back" disabled={busy} onClick={onBack}><ChevronLeft size={17}/> Change number</button><h1>Enter SMS code</h1><p>{message||phone}</p><form onSubmit={e=>{e.preventDefault();onVerify();}}><input className="otp-single" aria-label="Six-digit SMS code" autoComplete="one-time-code" autoFocus inputMode="numeric" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="6-digit code"/>{error&&<div role="alert" className="message error">{error}</div>}<button className="primary full" disabled={busy||otp.length!==6} type="submit">{busy?'Checking…':'Verify'} <ChevronRight size={18}/></button></form><button className="auth-secondary" disabled={busy||resendSeconds>0} onClick={onResend}>{resendSeconds>0?`Resend code in ${resendSeconds}s`:'Resend SMS code'}</button></section></main>}
 
-function PinCreate({pin,busy,error,setPin,onSave}:{pin:string;busy:boolean;error:string;setPin:(v:string)=>void;onSave:()=>void}){return <main className="auth-shell"><section className="auth-card"><Brand/><h1>Create your PIN</h1><p>You’ll use this 4-digit PIN with your phone number next time.</p><input className="pin-input" autoFocus type="password" inputMode="numeric" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••"/>{error&&<div className="message error">{error}</div>}<button className="primary full" disabled={busy||pin.length!==4} onClick={onSave}>{busy?'Saving…':'Continue'} <ChevronRight size={18}/></button></section></main>}
+
 function Brand(){return <div className="auth-brand"><span className="brand-mark"><GraduationCap size={22}/></span><b>Skolo Saka</b></div>}
 function NavButton({active,icon,label,badge,onClick}:{active:boolean;icon:ReactNode;label:string;badge?:number;onClick:()=>void}){return <button className={active?'active':''} onClick={onClick}>{icon}<span>{label}</span>{badge?<b className="nav-badge">{badge}</b>:null}</button>}
 function NavLink({href,icon,label,badge}:{href:string;icon:ReactNode;label:string;badge?:number}){return <a href={href}>{icon}<span>{label}</span>{badge?<b className="nav-badge">{badge}</b>:null}</a>}

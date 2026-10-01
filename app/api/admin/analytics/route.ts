@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminSupabase, serverSupabase } from '@/lib/paystack-server';
+import { adminSupabase } from '@/lib/paystack-server';
+import { authenticatedUser } from '@/lib/payment-instructions-server';
 
 export async function GET(request: NextRequest) {
-  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  if (!token) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-  const { data: authData, error: authError } = await serverSupabase(token).auth.getUser(token);
-  if (authError || !authData.user) return NextResponse.json({ error: 'Invalid session.' }, { status: 401 });
+  const auth = await authenticatedUser(request);
+  if (!auth) return NextResponse.json({ error: 'Sign in with your password first.' }, { status: 401 });
   const db = adminSupabase();
-  const { data: role, error: roleError } = await db.from('platform_admins').select('user_id').eq('user_id', authData.user.id).maybeSingle();
+  const { data: role, error: roleError } = await db.from('platform_admins').select('user_id').eq('user_id', auth.user.id).maybeSingle();
   if (roleError) return NextResponse.json({ error: 'Could not verify administrator access.' }, { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
   if (!role) return NextResponse.json({ error: 'Platform administrator access required.' }, { status: 403 });
   const requested = Number(request.nextUrl.searchParams.get('days') || 30);

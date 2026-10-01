@@ -1,6 +1,7 @@
 import { paymentConfiguration } from '@/lib/payment-environment';
 import { NextRequest, NextResponse } from 'next/server';
-import { paystackRequest, serverSupabase } from '@/lib/paystack-server';
+import { paystackRequest } from '@/lib/paystack-server';
+import { authenticatedUser } from '@/lib/payment-instructions-server';
 
 type InitializeResponse = { status:boolean; data:{ authorization_url:string; access_code:string; reference:string } };
 type PlanResponse = { status:boolean; data:{ plan_code:string } };
@@ -11,11 +12,9 @@ export async function POST(request: NextRequest) {
     try { origin = paymentConfiguration().origin; } catch {
       return NextResponse.json({ error: 'Payments are not available yet. Please try again later.' }, { status: 503 });
     }
-    const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-    if (!token) return NextResponse.json({ error:'Sign in first.' }, { status:401 });
-    const supabase = serverSupabase(token);
-    const { data:{ user }, error:userError } = await supabase.auth.getUser(token);
-    if (userError || !user) return NextResponse.json({ error:'Your session has expired.' }, { status:401 });
+    const auth = await authenticatedUser(request);
+    if (!auth) return NextResponse.json({ error:'Sign in with your password first.' }, { status:401 });
+    const { user, supabase } = auth;
     const { commitmentId } = await request.json();
     const { data:commitment, error } = await supabase.from('commitments').select('id,user_id,school_id,amount_cents,currency,status,payment_plan_code,schools(name)').eq('id',commitmentId).eq('user_id',user.id).single();
     if (error || !commitment) return NextResponse.json({ error:'Contribution not found.' }, { status:404 });

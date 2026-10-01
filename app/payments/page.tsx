@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 import styles from './payments.module.css';
 import { SecondaryMobileNavigation } from '../SecondaryShell';
@@ -83,6 +83,9 @@ export default function PaymentsPage() {
   const [consent, setConsent] = useState(false);
   useEffect(() => { setConsent(false); }, [kind, term, customTerm, selected, amounts, linkLater, draftId, draftAmount]);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelTarget,setCancelTarget]=useState<{id:string;legacy:boolean}|null>(null);
+  const [cancelPassword,setCancelPassword]=useState('');
+  const [cancelError,setCancelError]=useState('');
   const [editingAmount, setEditingAmount] = useState<string | null>(null);
   const [newAmount, setNewAmount] = useState('');
   const [savingAmount, setSavingAmount] = useState<string | null>(null);
@@ -231,32 +234,28 @@ export default function PaymentsPage() {
     }
   }
 
-  async function cancelInstruction(instructionId: string) {
-    if (!window.confirm('Cancel this arrangement? Any future scheduled charges will stop.')) return;
-    setCancelling(instructionId); setError(''); setMessage('');
-    try {
-      const response = await authedFetch('/api/payments/cancel', { method: 'POST', body: JSON.stringify({ instructionId }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not cancel payment.');
-      setMessage(data.status === 'non_renewing' ? 'Cancellation requested. Paystack will not renew this payment.' : 'Payment cancelled.');
-      void trackEvent('payment_cancelled',{status:data.status||'cancelled'});
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel payment.'); }
-    finally { setCancelling(null); }
+  function cancelInstruction(id:string){setCancelTarget({id,legacy:false});setCancelPassword('');setCancelError('');}
+  function cancelLegacy(id:string){setCancelTarget({id,legacy:true});setCancelPassword('');setCancelError('');}
+  async function submitCancellation(event:FormEvent){
+    event.preventDefault();if(!cancelTarget||!cancelPassword||cancelling)return;
+    const target=cancelTarget;setCancelling(target.id);setCancelError('');setError('');setMessage('');
+    try{
+      const response=await authedFetch('/api/payments/cancel',{method:'POST',body:JSON.stringify({...target.legacy?{legacyCommitmentId:target.id}:{instructionId:target.id},password:cancelPassword})});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||'Could not cancel this contribution.');
+      setMessage(data.status==='non_renewing'?'Cancellation requested. Paystack will not renew this payment.':'Contribution cancelled.');
+      setCancelTarget(null);void trackEvent('payment_cancelled',{status:data.status||'cancelled'});await load();
+    }catch(e){setCancelError(e instanceof Error?e.message:'Could not cancel this contribution.');}
+    finally{setCancelPassword('');setCancelling(null);}
   }
-
-  async function cancelLegacy(commitmentId: string) {
-    if (!window.confirm('Cancel this older individual monthly contribution?')) return;
-    setCancelling(commitmentId); setError(''); setMessage('');
-    try {
-      const response = await authedFetch('/api/payments/cancel', { method: 'POST', body: JSON.stringify({ legacyCommitmentId: commitmentId }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not cancel payment.');
-      setMessage('Individual contribution cancelled. You can now include that school in one combined monthly contribution.');
-      void trackEvent('legacy_payment_cancelled');
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel payment.'); }
-    finally { setCancelling(null); }
+  function cancellationForm(id:string){
+    if(cancelTarget?.id!==id)return null;
+    return <form className={styles.amountEditor} onSubmit={submitCancellation}>
+      <p>Confirm your password to stop future scheduled contributions.</p>
+      <label htmlFor={`cancel-password-${id}`}>Password</label><input id={`cancel-password-${id}`} type="password" autoComplete="current-password" value={cancelPassword} onChange={e=>setCancelPassword(e.target.value)} disabled={Boolean(cancelling)} required/>
+      {cancelError&&<p role="alert">{cancelError}</p>}
+      <div><button className={styles.danger} type="submit" disabled={!cancelPassword||Boolean(cancelling)}>{cancelling?'Confirming…':'Confirm cancellation'}</button><button className={styles.secondaryButton} type="button" disabled={Boolean(cancelling)} onClick={()=>{setCancelTarget(null);setCancelPassword('');setCancelError('');}}>Keep contribution</button></div>
+    </form>;
   }
 
   function beginAmountChange(row: Instruction) {
@@ -348,9 +347,9 @@ export default function PaymentsPage() {
       <section className={styles.activeSection}>
         <h2>Your contribution arrangements</h2>
         <div className={styles.paymentGrid}>
-          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next contribution: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="number" min="10" max="1000000" step="0.01" value={newAmount} onChange={e => setNewAmount(e.target.value)} disabled={savingAmount === row.id}/><p>Applies on the next billing date. Nothing is charged now.</p><div><button className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => setEditingAmount(null)}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly contribution'}</button>}</article>)}
+          {currentInstructions.map(row => <article className={styles.paymentCard} key={row.id}><div className={styles.paymentHead}><div><h3>{row.kind === 'recurring' ? 'Monthly arrangement' : 'Once-off arrangement'}</h3><div className={styles.legacyTag}>{row.provider === 'draft' ? 'No card linked · No charge' : row.provider === 'paystack' ? 'Paystack' : row.provider}</div></div><span className={`${styles.status} ${row.status === 'pending' ? styles.pending : row.status === 'non_renewing' ? styles.nonrenewing : ''}`}>{row.provider === 'draft' ? 'Awaiting checkout' : row.status.replace('_',' ')}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>{row.kind === 'recurring' ? '/month' : ''}</span>{row.kind === 'recurring' && <span>{row.term_months ? `${row.term_months} month term` : 'Until cancelled'}</span>}</div>{row.next_payment_at && <p className={styles.fineprint}>Next contribution: {new Date(row.next_payment_at).toLocaleDateString('en-ZA')}</p>}<div className={styles.allocations}>{!row.allocations.length && row.provider !== 'draft' && <p className={styles.fineprint}>Donation without a school allocation</p>}{row.allocations.map(a => <div className={styles.allocation} key={a.id}><span>{a.school?.name || 'School'}</span><span>{money(a.amount_cents)}</span></div>)}</div>{editingAmount === row.id && <div className={styles.amountEditor}><label htmlFor={`amount-${row.id}`}>New monthly amount (R)</label><input id={`amount-${row.id}`} type="number" min="10" max="1000000" step="0.01" value={newAmount} onChange={e => setNewAmount(e.target.value)} disabled={savingAmount === row.id}/><p>Applies on the next billing date. Nothing is charged now.</p><div><button className={styles.linkButton} disabled={savingAmount === row.id} onClick={() => changeAmount(row)}>{savingAmount === row.id ? 'Saving…' : 'Save new amount'}</button><button className={styles.secondaryButton} disabled={savingAmount === row.id} onClick={() => setEditingAmount(null)}>Keep current amount</button></div></div>}{row.kind === 'recurring' && row.provider === 'paystack' && row.status === 'active' && editingAmount !== row.id && <button className={styles.linkButton} disabled={savingAmount !== null || cancelling !== null} onClick={() => beginAmountChange(row)}>Change monthly amount</button>}{row.provider === 'draft' && <button className={styles.linkButton} disabled={busy || loading} onClick={() => linkDraft(row)}>Continue to checkout</button>}{(row.kind === 'recurring' || row.provider === 'draft') && <button className={styles.danger} disabled={cancelling === row.id || row.status === 'non_renewing' || savingAmount === row.id} onClick={() => cancelInstruction(row.id)}>{row.status === 'non_renewing' ? 'Cancellation requested' : cancelling === row.id ? 'Cancelling…' : row.provider === 'draft' ? 'Delete arrangement' : 'Cancel monthly contribution'}</button>}{cancellationForm(row.id)}</article>)}
 
-          {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual contribution'}</button></article>)}
+          {overview?.legacy.map(row => <article className={`${styles.paymentCard} ${styles.legacy}`} key={row.id}><div className={styles.paymentHead}><div><h3>{row.school?.name || 'School'}</h3><div className={styles.legacyTag}>Older individual Paystack subscription</div></div><span className={styles.status}>{row.status}</span></div><div className={styles.paymentMeta}><span><b>{money(row.amount_cents)}</b>/month</span></div><button className={styles.danger} disabled={cancelling === row.id} onClick={() => cancelLegacy(row.id)}>{cancelling === row.id ? 'Cancelling…' : 'Cancel individual contribution'}</button>{cancellationForm(row.id)}</article>)}
 
           {!loading && !currentInstructions.length && !overview?.legacy.length && <div className={styles.empty}>No active contributions yet. Set one up above.</div>}
         </div>
