@@ -56,3 +56,19 @@
 
 .directoryHeading { margin-bottom: 16px; }
 .directoryHeading p { margin: 6px 0 0; color: #64766d; }
+
+@media (max-width: 720px) {
+  .mine { margin-bottom: 24px; }
+  .mineEmpty { display: none; }
+  .sectionHeading { margin-bottom: 10px; }
+  .sectionHeading span { display: none; }
+  .sectionHeading h2 { margin: 0; font-size: 18px; }
+  .mineGrid { grid-template-columns: minmax(0, 1fr); }
+  .mineCard { grid-template-columns: minmax(0, 1fr) auto; padding: 12px; gap: 10px; border-radius: 13px; }
+  .mineCard > div:first-child, .mineCard small { display: none; }
+  .mineCard h3 { font-size: 15px; line-height: 1.35; }
+  .mineCard p { font-size: 12px; }
+  .directoryHeading { margin-bottom: 12px; }
+  .directoryHeading span, .directoryHeading p { display: none; }
+  .directoryHeading h2 { margin: 0; font-size: 18px; }
+}
