@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { adminSupabase, paystackRequest, serverSupabase } from '@/lib/paystack-server';
+import { hasPasswordCredential, PASSWORD_CREDENTIAL_VERSION } from '@/lib/password-auth';
 
 export type PaymentKind = 'one_off' | 'recurring';
 
@@ -32,7 +33,9 @@ export async function authenticatedUser(request: NextRequest) {
   if (!token) return null;
   const supabase = serverSupabase(token);
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
+  if (error || !user || !hasPasswordCredential(user)) return null;
+  const { data: verified, error: claimsError } = await supabase.auth.getClaims(token);
+  if (claimsError || verified?.claims?.sub !== user.id || verified.claims.app_metadata?.credential_version !== PASSWORD_CREDENTIAL_VERSION) return null;
   return { user, token, supabase };
 }
 
