@@ -12,3 +12,18 @@
     font-size: 16px;
   }
 }
+
+/* Signed-out pages only need one row for Sign in and About. */
+@media (max-width: 900px) {
+  .mobile-nav:has(> :last-child:nth-child(2)) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    height: 64px;
+  }
+  .mobile-nav:has(> :last-child:nth-child(2)) > :is(a, button) {
+    grid-column: auto;
+  }
+}
+
+.password-input { width: 100%; height: 52px; border: 1.5px solid var(--line); border-radius: 13px; padding: 0 13px; margin: 8px 0 12px; font-size: 16px; background: #fff; color: var(--ink); }
+.password-input:focus { outline: 2px solid #146b50; outline-offset: 2px; }

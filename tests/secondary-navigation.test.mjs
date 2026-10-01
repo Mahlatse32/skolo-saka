@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { hasPasswordCredential } from '../lib/password-auth.ts';
 
 const require = createRequire(import.meta.url);
 const code = ts.transpileModule(readFileSync('app/SecondaryShell.tsx', 'utf8'), {
@@ -27,6 +28,7 @@ function navigation(component = 'default') {
         },
         useEffect(effect) { cleanup ??= effect(); },
       };
+      if (name === '@/lib/password-auth') return { hasPasswordCredential };
       if (name === '@/lib/supabase') return {
         supabase: { auth: { onAuthStateChange(callback) {
           listener = callback;
@@ -56,6 +58,8 @@ function assertGuest(html) {
 test('public About keeps account links hidden before and after session initialization', () => {
   const nav = navigation();
   assertGuest(nav.render());
+  nav.session('INITIAL_SESSION', { user: { id: 'setup-only-session', app_metadata: {} } });
+  assertGuest(nav.render());
   nav.session('INITIAL_SESSION', null);
   const html = nav.render();
   assertGuest(html);
@@ -68,7 +72,7 @@ test('public About keeps account links hidden before and after session initializ
 test('restored sessions reveal both menus and sign-out removes account links immediately', () => {
   const nav = navigation();
   nav.render();
-  const session = { user: { id: 'signed-in-user' } };
+  const session = { user: { id: 'signed-in-user', app_metadata: { credential_version: 'password_v2' } } };
   nav.session('INITIAL_SESSION', session);
   for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED']) {
     nav.session(event, session);
@@ -85,7 +89,7 @@ test('restored sessions reveal both menus and sign-out removes account links imm
 test('standalone mobile navigation follows the same sign-in and sign-out behaviour', () => {
   const nav = navigation('SecondaryMobileNavigation');
   assertGuest(nav.render());
-  nav.session('SIGNED_IN', { user: { id: 'signed-in-user' } });
+  nav.session('SIGNED_IN', { user: { id: 'signed-in-user', app_metadata: { credential_version: 'password_v2' } } });
   const html = nav.render();
   assert.ok(html.includes('href="/?view=profile"'));
   assert.ok(html.includes('grid-template-columns:repeat(7,1fr)'));

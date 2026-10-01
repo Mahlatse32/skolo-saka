@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Building2, CircleUserRound, GraduationCap, Home, Info, LogIn, Trophy, WalletCards } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { hasPasswordCredential } from '@/lib/password-auth';
 
 type ActiveDestination='schools'|'projects'|'payments'|'about'|'sports';
 type NavigationProps={active:ActiveDestination;signedIn:boolean};
@@ -13,7 +14,7 @@ function useSignedIn(){
   const [signedIn,setSignedIn]=useState(false);
   useEffect(()=>{
     const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
-      setSignedIn(Boolean(session?.user));
+      setSignedIn(hasPasswordCredential(session?.user));
     });
     return ()=>subscription.unsubscribe();
   },[]);
